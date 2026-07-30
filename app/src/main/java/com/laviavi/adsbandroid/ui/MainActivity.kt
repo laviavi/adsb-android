@@ -1,0 +1,269 @@
+package com.laviavi.adsbandroid.ui
+
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Bundle
+import android.os.IBinder
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.laviavi.adsbandroid.capture.UsbHotplugReceiver
+import com.laviavi.adsbandroid.pipeline.PipelineService
+import com.laviavi.adsbandroid.ui.components.StatusStrip
+import com.laviavi.adsbandroid.ui.detail.AircraftDetailSheet
+import com.laviavi.adsbandroid.ui.logs.LogsScreen
+import com.laviavi.adsbandroid.ui.map.MapScreen
+import com.laviavi.adsbandroid.ui.navigation.AdsbDestination
+import com.laviavi.adsbandroid.ui.offline.OfflineMapsScreen
+import com.laviavi.adsbandroid.ui.receiver.ReceiverScreen
+import com.laviavi.adsbandroid.ui.settings.SettingsScreen
+import com.laviavi.adsbandroid.ui.text.LiveScreen
+import com.laviavi.adsbandroid.ui.theme.AdsbColors
+import com.laviavi.adsbandroid.ui.theme.AdsbTheme
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+
+    private val viewModel: MainViewModel by viewModels()
+    private var pipelineService: PipelineService? = null
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            val service = (binder as PipelineService.LocalBinder).getService()
+            pipelineService = service
+            viewModel.onServiceConnected(true)
+            lifecycleScope.launch { service.aircraft.collect { viewModel.onAircraftUpdate(it) } }
+            lifecycleScope.launch { service.stats.stats.collect { viewModel.onStatsUpdate(it) } }
+            lifecycleScope.launch { service.sourceState.collect { viewModel.onSourceState(it) } }
+            lifecycleScope.launch { service.config.collect { viewModel.onConfigUpdate(it) } }
+            lifecycleScope.launch { service.gainOptions.collect { viewModel.onGainOptions(it) } }
+            lifecycleScope.launch { service.history.collect { viewModel.onHistoryUpdate(it) } }
+            lifecycleScope.launch { service.droppedBatches.collect { viewModel.onDroppedBatches(it) } }
+            lifecycleScope.launch { service.coverage.collect { viewModel.onCoverage(it) } }
+        }
+        override fun onServiceDisconnected(name: ComponentName) {
+            pipelineService = null
+            viewModel.onServiceConnected(false)
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val intent = Intent(this, PipelineService::class.java)
+        startForegroundService(intent)
+        bindService(intent, connection, Context.BIND_AUTO_CREATE)
+
+        setContent {
+            AdsbTheme {
+                AdsbScaffold(
+                    viewModel = viewModel,
+                    onConfigChange = { newConfig ->
+                        pipelineService?.updateConfig(newConfig)
+                        viewModel.onConfigUpdate(newConfig)
+                    },
+                    onStart = { pipelineService?.startPipeline() },
+                    onStop = { pipelineService?.stopPipeline() },
+                    onReconnect = { pipelineService?.reconnect() },
+                    onClearHistory = { pipelineService?.clearHistory() },
+                    driverInstalled = UsbHotplugReceiver.isDriverInstalled(this@MainActivity),
+                )
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unbindService(connection)
+    }
+}
+
+/** Sub-screen route, reached from Settings rather than the navigation bar. */
+private const val ROUTE_OFFLINE_MAPS = "offline_maps"
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AdsbScaffold(
+    viewModel: MainViewModel,
+    onConfigChange: (com.laviavi.adsbandroid.pipeline.AppConfig) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onReconnect: () -> Unit,
+    onClearHistory: () -> Unit,
+    driverInstalled: Boolean,
+) {
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    val receiverStatus by viewModel.receiverStatus.collectAsStateWithLifecycle()
+    val selectedIcao by viewModel.selectedDetail.collectAsStateWithLifecycle()
+    val selectedAircraft by viewModel.selectedAircraft.collectAsStateWithLifecycle()
+
+    // Detail sheet state
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            AdsbDestination.entries.forEach { dest ->
+                item(
+                    icon = { Icon(dest.icon, contentDescription = dest.label) },
+                    label = { Text(dest.label) },
+                    selected = currentRoute == dest.route,
+                    onClick = {
+                        navController.navigate(dest.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
+            }
+        },
+        containerColor = AdsbColors.NavBar,
+        contentColor = AdsbColors.TextPrimary,
+        navigationSuiteColors = NavigationSuiteDefaults.colors(
+            navigationBarContainerColor = AdsbColors.Surface,
+            navigationBarContentColor = AdsbColors.TextSecondary,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(AdsbColors.Background),
+        ) {
+            StatusStrip(
+                status = receiverStatus,
+                onNavigateToReceiver = {
+                    navController.navigate(AdsbDestination.RECEIVER.route) {
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+            )
+
+            NavHost(
+                navController = navController,
+                startDestination = AdsbDestination.LIVE.route,
+                modifier = Modifier.weight(1f),
+            ) {
+                composable(AdsbDestination.LIVE.route) {
+                    LiveScreen(
+                        viewModel = viewModel,
+                        onAircraftClick = { icao ->
+                            viewModel.selectAircraft(icao)
+                        },
+                        onNavigateToReceiver = {
+                            navController.navigate(AdsbDestination.RECEIVER.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onShowOnMap = { icao ->
+                            viewModel.selectAircraft(icao)
+                            navController.navigate(AdsbDestination.MAP.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onConfigChange = onConfigChange,
+                        onStart = onStart,
+                        onStop = onStop,
+                        onReconnect = onReconnect,
+                    )
+                }
+                composable(AdsbDestination.MAP.route) {
+                    MapScreen(
+                        viewModel = viewModel,
+                        onAircraftClick = { icao -> viewModel.selectAircraft(icao) },
+                        onConfigChange = onConfigChange,
+                    )
+                }
+                composable(AdsbDestination.RECEIVER.route) {
+                    ReceiverScreen(
+                        viewModel = viewModel,
+                        onConfigChange = onConfigChange,
+                        onReconnect = onReconnect,
+                        onStop = onStop,
+                    )
+                }
+                composable(AdsbDestination.LOGS.route) {
+                    LogsScreen(
+                        viewModel = viewModel,
+                        onClearHistory = onClearHistory,
+                    )
+                }
+                composable(AdsbDestination.SETTINGS.route) {
+                    SettingsScreen(
+                        viewModel = viewModel,
+                        driverInstalled = driverInstalled,
+                        onConfigChange = onConfigChange,
+                        onOpenOfflineMaps = { navController.navigate(ROUTE_OFFLINE_MAPS) },
+                    )
+                }
+                // A sub-screen of Settings, deliberately not an AdsbDestination entry —
+                // those drive the navigation bar, and offline maps is not a top-level
+                // place the operator switches to while watching traffic.
+                composable(ROUTE_OFFLINE_MAPS) {
+                    val config by viewModel.config.collectAsState()
+                    OfflineMapsScreen(
+                        observerLat = config.observerLatitude,
+                        observerLon = config.observerLongitude,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+            }
+        }
+
+        // Detail bottom sheet
+        if (selectedIcao != null && selectedAircraft != null) {
+            ModalBottomSheet(
+                onDismissRequest = { viewModel.selectAircraft(null) },
+                sheetState = sheetState,
+                containerColor = AdsbColors.Surface,
+                contentColor = AdsbColors.TextPrimary,
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 8.dp)
+                            .size(width = 34.dp, height = 4.dp)
+                            .background(
+                                AdsbColors.Outline,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(2.dp),
+                            ),
+                    )
+                },
+            ) {
+                AircraftDetailSheet(
+                    aircraft = selectedAircraft!!,
+                    onDismiss = { viewModel.selectAircraft(null) },
+                )
+            }
+        }
+    }
+}

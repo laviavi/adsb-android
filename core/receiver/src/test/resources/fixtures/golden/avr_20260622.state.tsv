@@ -1,0 +1,4 @@
+checkpoint_s	icao	callsign	squawk	emitter_category	latitude	longitude	altitude_baro_ft	altitude_gnss_ft	on_ground	ground_speed_kts	track_deg	heading_deg	airspeed_kts	vertical_rate_fpm	speed_type	version	nac_p	nac_v	sil	tcas_sl	tcas_ra_active	tcas_ra_text	tcas_ra_complement	tcas_ra_terminated	tcas_target_icao	tcas_event_count	interrogator_ids	msg_count	valid_count	bad_crc_count	corrected_count	first_seen_ms	last_seen_ms	last_position_ms
+10	A0B7DC	UAL2666		27																	0			0		0		1	1	0	0	300	300	
+10	A114F4																				0			0		0		1	1	0	0	800	800	
+10	A1427F						12100		0			104.100000	248	-896	airspeed_ias	2	6	0	0		0			0		0	0	11	11	0	0	0	1200	

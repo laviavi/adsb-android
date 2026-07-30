@@ -1,0 +1,14 @@
+seq	ts_ms	hex	len	df	crc_status	crc_remainder	corrected_bit	recovered_icao	icao	callsign	squawk	tc	message_type	emitter_category	latitude	longitude	altitude_baro_ft	altitude_gnss_ft	on_ground	cpr_lat	cpr_lon	cpr_format	ground_speed_kts	track_deg	heading_deg	airspeed_kts	vertical_rate_fpm	speed_type	capability	ii_code	version	nic_supplement	nac_p	nac_v	sil	tcas_sl	tcas_ra_active	tcas_ra_text	tcas_ra_complement	tcas_ra_terminated	tcas_target_icao
+0	0	5DA1427F5BDA85	7	11	valid	0			A1427F				all_call_reply																5	0							0			0	
+1	100	8DA1427FEA178004013C08638885	14	17	valid	0			A1427F			29	unknown																5								0			0	
+2	200	8DA1427F58435645F0AA3B02326F	14	17	valid	0			A1427F			11	airborne_position_baro				12325		0	74488	43579	1							5								0			0	
+3	300	8DA0B7DC23541332DB6DA06B645F	14	17	valid	0			A0B7DC	UAL2666		4	identification	27															5								0			0	
+4	400	8DA1427FF83300060049B821291F	14	17	valid	0			A1427F			31	operational_status																5		2		6	0	0		0			0	
+5	500	8DA1427F990D2907D85415D1B039	14	17	valid	0			A1427F			19	airborne_velocity												104.400000	244	-1280	airspeed_ias	5								0			0	
+6	600	8DA1427F5841E6463AA986BE9090	14	17	valid	0			A1427F			11	airborne_position_baro				12150		0	74525	43398	1							5								0			0	
+7	700	8DA1427FEA178004013C08638885	14	17	valid	0			A1427F			29	unknown																5								0			0	
+8	800	8DA114F4EA03C86C013C086D5111	14	17	valid	0			A114F4			29	unknown																5								0			0	
+9	900	8DA1427F990D2807F84415771EDE	14	17	valid	0			A1427F			19	airborne_velocity												104.100000	248	-1024	airspeed_ias	5								0			0	
+10	1000	8DA1427F5841C64660A930FB7C1D	14	17	valid	0			A1427F			11	airborne_position_baro				12100		0	74544	43312	1							5								0			0	
+11	1100	8DA1427F990D2807F83C15A566C5	14	17	valid	0			A1427F			19	airborne_velocity												104.100000	248	-896	airspeed_ias	5								0			0	
+12	1200	5DA1427F5BDA85	7	11	valid	0			A1427F				all_call_reply																5	0							0			0	

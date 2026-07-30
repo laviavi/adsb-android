@@ -1,0 +1,51 @@
+{
+  "avr_frame_interval_sec": 0.1,
+  "checkpoint_sec": 10.0,
+  "fixtures": {
+    "avr_20260621": {
+      "crc_status_counts": {
+        "valid": 26512
+      },
+      "distinct_aircraft": 352,
+      "frames": 26512,
+      "frames_tsv_sha256_16": "a548047dbb8bba3b",
+      "kind": "avr",
+      "source": "adsb_20260621.txt",
+      "source_sha256": "1d969a1e0b1b39bb74bed9231c6f907308c472731b84b138ff4d894d54fbfe32",
+      "state_rows": 3481,
+      "state_tsv_sha256_16": "b6ff4ac617267aaa"
+    },
+    "avr_20260622": {
+      "crc_status_counts": {
+        "valid": 13
+      },
+      "distinct_aircraft": 3,
+      "frames": 13,
+      "frames_tsv_sha256_16": "48104268bb51b56b",
+      "kind": "avr",
+      "source": "adsb_20260622.txt",
+      "source_sha256": "5b682430e3558b91c7f187eb11cf8e71277979d3f725cc45d7595dde6141c3ff",
+      "state_rows": 3,
+      "state_tsv_sha256_16": "6a7f0ba901976db4"
+    },
+    "modes1_iq": {
+      "crc_status_counts": {
+        "bad": 38,
+        "corrected": 2,
+        "parity_addr": 233,
+        "recovered": 38,
+        "valid": 180
+      },
+      "distinct_aircraft": 1,
+      "frames": 491,
+      "frames_tsv_sha256_16": "7b375616e7783cd8",
+      "kind": "iq",
+      "source": "modes1.bin",
+      "source_sha256": "3a33e16025da8669149c780075950b4e908ca036ea21f9583c113f60d5fb3094",
+      "state_rows": 1,
+      "state_tsv_sha256_16": "7d5812799cd1d02d"
+    }
+  },
+  "python_root": "D:\\SDR\\adsb_v9_5",
+  "python_version": "9.0.6"
+}

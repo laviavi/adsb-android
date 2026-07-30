@@ -1,0 +1,492 @@
+seq	ts_ms	hex	len	df	crc_status	crc_remainder	corrected_bit	recovered_icao	icao	callsign	squawk	tc	message_type	emitter_category	latitude	longitude	altitude_baro_ft	altitude_gnss_ft	on_ground	cpr_lat	cpr_lon	cpr_format	ground_speed_kts	track_deg	heading_deg	airspeed_kts	vertical_rate_fpm	speed_type	capability	ii_code	version	nic_supplement	nac_p	nac_v	sil	tcas_sl	tcas_ra_active	tcas_ra_text	tcas_ra_complement	tcas_ra_terminated	tcas_target_icao
+0	0	8F4D2023587F345E35837E2218B2	14	17	valid	0			4D2023			11	airborne_position_baro				24275		0	12058	99198	1							7								0			0	
+1	1	B1E80D7FDFDC1F	7	22	parity_addr	16452545																																			
+2	1	1CE67F7F5FC135	7	3	parity_addr	11900719																																			
+3	2	76618521775A9B	7	14	parity_addr	6467483																																			
+4	2	06F61B7FC4EE0C	7	0	parity_addr	16663964																																			
+5	3	010248740019DF	7	0	parity_addr	1653013																																			
+6	4	0E8ACB7F7216A9	7	1	parity_addr	14328550																																			
+7	4	801CFF9D8FFFFE606600F7C37C00	14	16	parity_addr	9721469																																			
+8	5	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+9	5	427CB3E138C1FF	7	8	parity_addr	9971503																																			
+10	5	79D8EE1F96710F	7	15	parity_addr	343013																																			
+11	6	20000F1F684A6C	7	4	recovered	2011828		4D2023	4D2023				altitude_reply				23375		0																		0			0	
+12	6	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+13	6	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+14	6	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+15	6	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+16	6	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+17	7	18EE039E7EAFFB	7	3	parity_addr	15048179																																			
+18	7	01A9A40464009A	7	0	parity_addr	869978																																			
+19	7	06A69011CC896A	7	0	parity_addr	10494105																																			
+20	9	BC7ED8781A8FC5	7	23	parity_addr	13379084																																			
+21	9	FFFF8F883FC844	7	31	parity_addr	3697252																																			
+22	9	9C3BDC5F6000260E599B1F87CBF6	14	19	parity_addr	14447391																																			
+23	10	018987FAF0B3D0	7	0	parity_addr	6427085																																			
+24	10	5ECE01806EC0BB	7	11	bad	5189544																																			
+25	11	8565BFB8CDDED4A52F07D68A2E4B	14	16	parity_addr	3680388																																			
+26	11	EEE160FC38AC00	7	29	parity_addr	15138637																																			
+27	11	63B081800136A0	7	12	parity_addr	1761164																																			
+28	12	8D4D2023991094AD487C14FC9E3D	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+29	12	E14CFFF0B67C00	7	28	parity_addr	3463783																																			
+30	13	C06C3F041079F8633F89E599F183	14	24	parity_addr	14824284																																			
+31	14	8D4D202358792453EF858BAE7FC9	14	17	valid	0			4D2023			11	airborne_position_baro				23050		0	10743	99723	1							5								0			0	
+32	14	2E4B9C811A9A40	7	5	parity_addr	15857793																																			
+33	14	33C0037CCBA9A4	7	6	parity_addr	9968418																																			
+34	17	8F4D20235877D0BC7D99551E27CA	14	17	valid	0			4D2023			11	airborne_position_baro				22925		0	24126	104789	0							7								0			0	
+35	19	08CCFFC06E625B	7	1	parity_addr	9520372																																			
+36	19	8F4D20235877B0BC01996FF7B3F2	14	17	valid	0			4D2023			11	airborne_position_baro				22875		0	24064	104815	0							7								0			0	
+37	20	8F4D2023991093AD287C148ACCDC	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+38	20	328FFD8780F67D	7	6	parity_addr	4659988																																			
+39	20	07FC7907713EFB	7	0	parity_addr	7576695																																			
+40	21	EC7DDEEEC1F383	7	29	parity_addr	9704940																																			
+41	21	8F4D20232004D0F4CB1820000D24	14	17	valid	0			4D2023	AMC421		4	identification	24															7								0			0	
+42	21	71BE44EF1E2200	7	14	parity_addr	16430235																																			
+43	22	02E70EBA61A98A	7	0	parity_addr	11136591																																			
+44	22	8F4D20235877A0BBBF997CDB827B	14	17	valid	0			4D2023			11	airborne_position_baro				22850		0	24031	104828	0							7								0			0	
+45	22	8F4D2023991093AD287C13751CF8	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+46	22	8F4D2023587790BBA5998227C948	14	17	valid	0			4D2023			11	airborne_position_baro				22825		0	24018	104834	0							7								0			0	
+47	22	8F4D2023991093AD287C148ACCDC	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+48	23	3B9EC06B087EFF	7	7	parity_addr	1902498																																			
+49	23	0CEE203AC7CC3B	7	1	parity_addr	6080542																																			
+50	24	07E3BBDF33F987	7	0	parity_addr	2100869																																			
+51	24	0EC98406CBFE73	7	1	parity_addr	13333268																																			
+52	24	08CC07F3FA0B2D	7	1	parity_addr	1922475																																			
+53	24	B0C48F4D202358	7	22	parity_addr	10491060																																			
+54	24	8F4D2023991093AD087C133060D1	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+55	24	02E60EB9BE4118	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22825		0																		0			0	
+56	25	02E60EB9BE4118	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22825		0																		0			0	
+57	25	02E60EB841B511	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22800		0																		0			0	
+58	25	1CCDDD86EB0071	7	3	parity_addr	4059710																																			
+59	26	8F4D2023991093AD087C14CFB0F5	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+60	27	8F4D202358777451AB85FC938B46	14	17	valid	0			4D2023			11	airborne_position_baro				22775		0	10453	99836	1							7								0			0	
+61	27	8E4D202258666453998C06C9C9C0	14	17	bad	4479266																																			
+62	27	8F4D2023991093AD087C14CFB0F5	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+63	28	3FBFCCF678FEC3	7	7	parity_addr	10930768																																			
+64	28	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+65	28	07824300633803	7	0	parity_addr	14568445																																			
+66	28	DECF1E76247A69	7	27	parity_addr	3000201																																			
+67	29	8F4D2023991093AD087C133060D1	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+68	29	5F4D20232DAF3C	7	11	bad	92466																																			
+69	29	5F4D20232DAF3C	7	11	bad	92466																																			
+70	29	5F4D20232DAF3C	7	11	bad	92466																																			
+71	29	5E4D2066292E38	7	11	bad	6707195																																			
+72	29	8F4D2023587750BAC799AE61B181	14	17	valid	0			4D2023			11	airborne_position_baro				22725		0	23907	104878	0							7								0			0	
+73	30	0CFDF1848EB67F	7	1	parity_addr	14187728																																			
+74	30	5F4D20232DAF3C	7	11	bad	92466																																			
+75	30	5F4D20232DAF3C	7	11	bad	92466																																			
+76	30	FC92702193F58E	7	31	parity_addr	10540661																																			
+77	30	00DB768FDE05FE	7	0	parity_addr	1726468																																			
+78	31	4CCFF80780F67E	7	9	parity_addr	8636025																																			
+79	31	9F872BFFFE49FE1EFE97CD9DDC18	14	19	parity_addr	13981837																																			
+80	31	FFBC8CEE7FFCDB	7	31	parity_addr	7976891																																			
+81	32	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+82	32	8F4D2023991093AD087C14CFB0F5	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+83	32	C07F4165BFB9A4A1FFF9082E3859	14	24	parity_addr	9418983																																			
+84	32	8F4D202358773450D586263C41FF	14	17	valid	0			4D2023			11	airborne_position_baro				22675		0	10346	99878	1							7								0			0	
+85	33	8F4D2023991093ACE87C133E1D54	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+86	33	0CE87BF4DBFE7E	7	1	parity_addr	9536970																																			
+87	33	0EE8FFF4AFFC7E	7	1	parity_addr	10073715																																			
+88	34	0ECF4E77F8F767	7	1	parity_addr	4738818																																			
+89	34	DE10E7F9CCD7FF	7	27	parity_addr	7788010																																			
+90	34	8F4D202358773450B7862CE80171	14	17	valid	0			4D2023			11	airborne_position_baro				22675		0	10331	99884	1							7								0			0	
+91	34	8F4D2023991093ACE87C14C1CD70	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+92	35	15FE0B4E36F000	7	2	parity_addr	7900866																																			
+93	35	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+94	35	8F4D2023587720BA1799D04DB987	14	17	valid	0			4D2023			11	airborne_position_baro				22650		0	23819	104912	0							7								0			0	
+95	35	3BCD1E9A404732	7	7	parity_addr	2675748																																			
+96	35	E7C1C1C443303C	7	28	parity_addr	12620962																																			
+97	37	FB8CCF0CB6C81F	7	31	parity_addr	15799062																																			
+98	38	8F4D2023587710B9D199DDD3F278	14	17	valid	0			4D2023			11	airborne_position_baro				22625		0	23784	104925	0							7								0			0	
+99	39	F06CB1D7D219E8	7	30	parity_addr	8297536																																			
+100	39	00E4DACE0906DB	7	0	parity_addr	2432294																																			
+101	39	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+102	40	9E4D206750E60CD06F0E4CC670C6	14	19	parity_addr	4524215																																			
+103	40	8F4D2023991093ACE87C14C1CD70	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+104	41	A0200EB02004D0F4CB18200BA365	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22600																				0			0	
+105	42	A8201024FA8103000000004DA3BC	14	21	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+106	42	A0200EB0000000000000003FC97C	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22600																				0			0	
+107	42	A0200EB0000000000000003FC97C	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22600																				0			0	
+108	42	A0200EB0000000000000003FC97C	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22600																				0			0	
+109	42	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+110	42	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+111	42	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+112	42	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+113	43	67FFFDF86637DF	7	12	parity_addr	4513774																																			
+114	43	1AEDFFC64BF041	7	3	parity_addr	4042742																																			
+115	43	8F4D20235875F44FFF864F904C4E	14	17	valid	0			4D2023			11	airborne_position_baro				22575		0	10239	99919	1							7								0			0	
+116	43	8F4D2023991093ACE87C14C1CD70	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+117	44	8F4D20235875F0B95799F4278BE2	14	17	valid	0			4D2023			11	airborne_position_baro				22575		0	23723	104948	0							7								0			0	
+118	44	8F4D2023991093ACE87C14C1CD70	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+119	44	8F4D20235875E0B93D99FCADD99F	14	17	valid	0			4D2023			11	airborne_position_baro				22550		0	23710	104956	0							7								0			0	
+120	44	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+121	44	07E08BC833BFC9	7	0	parity_addr	10890299																																			
+122	44	7703E7E4D81B70	7	14	parity_addr	1042055																																			
+123	45	0780C381333E99	7	0	parity_addr	15664064																																			
+124	45	C6DB0060B015B1D96C0C530D3D99	14	24	parity_addr	9585055																																			
+125	45	8E4920673B31932998F8348CA351	14	17	bad	1670752																																			
+126	46	B3D270043F45F2	7	22	parity_addr	14060478																																			
+127	46	305BC0726C30BF	7	6	parity_addr	8041039																																			
+128	47	8F4D20232004D0F4CB1820000D24	14	17	valid	0			4D2023	AMC421		4	identification	24															7								0			0	
+129	47	5F4D20622DAE00	7	11	bad	14338148																																			
+130	47	8F4D20235875D44F77866E8B8692	14	17	valid	0			4D2023			11	airborne_position_baro				22525		0	10171	99950	1							7								0			0	
+131	47	8F4D2023991093ACC8801497EF66	14	17	valid	0			4D2023			19	airborne_velocity														-1984		7								0			0	
+132	48	8F4D20235875C44F598674BC817A	14	17	valid	0			4D2023			11	airborne_position_baro				22500		0	10156	99956	1							7								0			0	
+133	48	8E4D20639911932CC9803497CE4C	14	17	bad	2642459																																			
+134	50	1ECF8006DB5978	7	3	parity_addr	928699																																			
+135	51	8F4D20235875B44F29867BC2A7F9	14	17	valid	0			4D2023			11	airborne_position_baro				22475		0	10132	99963	1							7								0			0	
+136	51	8F4D2023991093ACC8801497EF66	14	17	valid	0			4D2023			19	airborne_velocity														-1984		7								0			0	
+137	51	0CCFF006D3FE76	7	1	parity_addr	6421819																																			
+138	51	D8CFE6145FF87A	7	27	parity_addr	5111673																																			
+139	52	39AE9F0C02FB00	7	7	parity_addr	6047089																																			
+140	52	10C02C7DCCFC7E	7	2	parity_addr	10997671																																			
+141	53	8F4D20275865B0B07F9A610CA4D6	14	17	bad	1046017																																			
+142	53	8F4D2023991093ACC8801497EF66	14	17	valid	0			4D2023			19	airborne_velocity														-1984		7								0			0	
+143	53	0E1F38596FEE53	7	1	parity_addr	758314																																			
+144	53	8F4D2023991093ACC87C1484B159	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+145	53	02E60E9A4068BA	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22450		0																		0			0	
+146	53	DF677BE0E95DF4	7	27	parity_addr	10518796																																			
+147	54	5F4D20232DAF3C	7	11	bad	92466																																			
+148	54	5E492066692E78	7	11	bad	12868755																																			
+149	54	5F4D20232DAF3C	7	11	bad	92466																																			
+150	54	5F4D20232DAF3C	7	11	bad	92466																																			
+151	54	5F4D20232DAF3C	7	11	bad	92466																																			
+152	55	5F4D20232DAF3C	7	11	bad	92466																																			
+153	55	8F4D2023587590B83D9A2FFCF986	14	17	valid	0			4D2023			11	airborne_position_baro				22425		0	23582	105007	0							7								0			0	
+154	55	8F4D2023991093ACC87C1484B159	14	17	valid	0			4D2023			19	airborne_velocity														-1920		7								0			0	
+155	55	5F4D20232DAF00	7	11	valid	0			4D2023				all_call_reply																7	0							0			0	
+156	55	02E60E99BF80A8	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22425		0																		0			0	
+157	55	02E60E99BF80A8	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22425		0																		0			0	
+158	56	8F4D20235875944EA1869709A985	14	17	valid	0			4D2023			11	airborne_position_baro				22425		0	10064	99991	1							7								0			0	
+159	56	8F4D2023991093ACC8801497EF66	14	17	valid	0			4D2023			19	airborne_velocity														-1984		7								0			0	
+160	56	A0200E999D500031E40000C661EC	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22425																				0			0	
+161	57	A8201024807705306004C369C73C	14	21	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+162	57	A0200E99B62A35287E17C2D5EC8F	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22425																				0			0	
+163	57	A0200E9910010080E60000A90752	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				22425																				0			0	
+164	59	4CFC00F2579C78	7	9	parity_addr	7109771																																			
+165	59	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+166	59	8D4D20235875744E5986A6088193	14	17	valid	0			4D2023			11	airborne_position_baro				22375		0	10028	100006	1							5								0			0	
+167	59	8D4D2023991093ACA87C14FBD7D2	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+168	60	8D4D2023587570B7AD9A4DD39061	14	17	valid	0			4D2023			11	airborne_position_baro				22375		0	23510	105037	0							5								0			0	
+169	60	8D4D2023991093ACA87C14FBD7D2	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+170	60	8D4D20232004D0F4CB1820B0EFD4	14	17	valid	0			4D2023	AMC421		4	identification	24															5								0			0	
+171	61	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+172	61	02E60E964020E0	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22350		0																		0			0	
+173	61	02E60E964020E0	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22350		0																		0			0	
+174	61	8D4D2023587560B77F9A5545BC58	14	17	valid	0			4D2023			11	airborne_position_baro				22350		0	23487	105045	0							5								0			0	
+175	61	8D4D2023191093A8A87834F39792	14	17	bad	4185967																																			
+176	61	18DB7FCFA6F7F8	7	3	parity_addr	2000330																																			
+177	61	1ECFBA339FF670	7	3	parity_addr	14351243																																			
+178	62	8D4D20235875544DE586BC3E9C91	14	17	corrected	10778329	66		4D2023			11	airborne_position_baro				22325		0	9970	100028	1							5								0			0	
+179	62	8D4D2023991093ACA87C14FBD7D2	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+180	62	DCCE04F6938763	7	27	parity_addr	16688268																																			
+181	63	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+182	63	8D4D20235875544DC586C27916F1	14	17	valid	0			4D2023			11	airborne_position_baro				22325		0	9954	100034	1							5								0			0	
+183	64	8D4D2023991092ACA87C14F8DD1C	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+184	64	02E60E95BFC8F2	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				22325		0																		0			0	
+185	64	8D4D2023991092ACA87C14F8DD1C	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+186	65	1EEFC3E2B68077	7	3	parity_addr	12844475																																			
+187	66	C13A4F3780B9FE6238902C9F89E0	14	24	parity_addr	6768498																																			
+188	66	8D4D2023991092ACA87C14F8DD1C	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+189	67	CCCF00F4DBB870	7	25	parity_addr	16237114																																			
+190	67	CCC9FFB681CCC0	7	25	parity_addr	2608276																																			
+191	68	8D4D2023991092ACA87C15072915	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+192	68	0CCF804693C068	7	1	parity_addr	856814																																			
+193	68	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+194	68	DECC11F683F079	7	27	parity_addr	13003892																																			
+195	69	1ECF1C077EF67F	7	3	parity_addr	9216257																																			
+196	69	3EE24CCCF806D1	7	7	parity_addr	10196627																																			
+197	69	DECC0697206771	7	27	parity_addr	2214858																																			
+198	70	8D4D2023587520B69B9A81BA7E17	14	17	valid	0			4D2023			11	airborne_position_baro				22250		0	23373	105089	0							5								0			0	
+199	70	1ECFF01693127E	7	3	parity_addr	14166229																																			
+200	70	0F296E27E7F9C0	7	1	parity_addr	3563592																																			
+201	70	CCEF80F780C66F	7	25	parity_addr	7558941																																			
+202	71	034ABDFF6C3E24	7	0	parity_addr	16549609																																			
+203	71	8D4D2023587510B67D9A85E2CA51	14	17	valid	0			4D2023			11	airborne_position_baro				22225		0	23358	105093	0							5								0			0	
+204	71	8D4D2023991092ACA87C15072915	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+205	71	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+206	72	8D4D2023587500B6539A8FD52D61	14	17	valid	0			4D2023			11	airborne_position_baro				22200		0	23337	105103	0							5								0			0	
+207	72	8D4D2023991092ACA88014EB8323	14	17	valid	0			4D2023			19	airborne_velocity														-1984		5								0			0	
+208	72	4D4D30333B55B6	7	9	parity_addr	3193379																																			
+209	73	20000E909EE164	7	4	recovered	2011828		4D2023	4D2023				altitude_reply				22200		0																		0			0	
+210	73	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+211	73	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+212	73	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+213	73	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+214	73	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+215	74	DCCEEFC7C2F643	7	27	parity_addr	14251752																																			
+216	74	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+217	74	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+218	75	3F97B9596FEE33	7	7	parity_addr	2302308																																			
+219	75	8D4D20232004D0F4CB1820B0EFD4	14	17	valid	0			4D2023	AMC421		4	identification	24															5								0			0	
+220	75	8D4D20235873F44C9F86FDABDEF4	14	17	valid	0			4D2023			11	airborne_position_baro				22175		0	9807	100093	1							5								0			0	
+221	76	E16E9DCDFFFBF6	7	28	parity_addr	290031																																			
+222	76	8D4D20235873E0B5E99AA7481C68	14	17	valid	0			4D2023			11	airborne_position_baro				22150		0	23284	105127	0							5								0			0	
+223	76	8D4D2023991092ACA8801514772A	14	17	valid	0			4D2023			19	airborne_velocity														-1984		5								0			0	
+224	76	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+225	78	8D4D20235873844B2F87466EE42F	14	17	valid	0			4D2023			11	airborne_position_baro				22000		0	9623	100166	1							5								0			0	
+226	79	5FBF02E812007F	7	11	bad	13145259																																			
+227	79	6909087CFE3C3B	7	13	parity_addr	651063																																			
+228	79	8D4D20235873744AE58751460A5C	14	17	valid	0			4D2023			11	airborne_position_baro				21975		0	9586	100177	1							5								0			0	
+229	80	7F0064FF4807C6	7	15	parity_addr	8984065																																			
+230	80	A800102480B70530200CC1BE9F9E	14	21	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+231	81	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+232	81	09CED050448127	7	1	parity_addr	894966																																			
+233	81	0360CF27FE5FFB	7	0	parity_addr	16022891																																			
+234	82	044E1A5E0070CA	7	0	parity_addr	12697745																																			
+235	82	8D4D2023991091AC888014ABE058	14	17	valid	0			4D2023			19	airborne_velocity														-1984		5								0			0	
+236	82	77F2DFC083692D	7	14	parity_addr	14560218																																			
+237	82	0FE341FFF26FE4	7	1	parity_addr	1665618																																			
+238	83	7308036D003FE1	7	14	parity_addr	4576745																																			
+239	83	00CC7B06501A6D	7	0	parity_addr	762755																																			
+240	84	947F47300FFC9FE8B80187333F1E	14	18	bad	4716629																																			
+241	84	AC1FC0E09EE49F393F433180593F	14	21	parity_addr	1229591																																			
+242	84	065EE525BFB94F	7	0	parity_addr	15841560																																			
+243	84	3701CB63D9D5FE	7	6	parity_addr	8789638																																			
+244	85	5D4D20237A559A	7	11	bad	92466																																			
+245	85	5D4D20237A559A	7	11	bad	92466																																			
+246	85	5D4D20237A559A	7	11	bad	92466																																			
+247	85	BF81C87C6BA9A4	7	23	parity_addr	8562926																																			
+248	86	5D4D20237A559A	7	11	bad	92466																																			
+249	86	017CFFA09B7B04	7	0	parity_addr	15325251																																			
+250	86	5D4D20237A559A	7	11	bad	92466																																			
+251	87	8D4D2023587310B3399B2E12F1E1	14	17	valid	0			4D2023			11	airborne_position_baro				21825		0	22940	105262	0							5								0			0	
+252	87	9D596067113191A9998035A9CAB4	14	19	parity_addr	2669443																																			
+253	87	275FF1D31596E0	7	4	parity_addr	15352978																																			
+254	87	8D4D2023991090AC998034A8CA96	14	17	bad	15123756																																			
+255	88	E1E0BF8EC4B18E	7	28	parity_addr	15416265																																			
+256	88	CD7C667FF372D7	7	25	parity_addr	1849496																																			
+257	89	8D4D2023991090AC888014A8EA96	14	17	valid	0			4D2023			19	airborne_velocity														-1984		5								0			0	
+258	89	20000E30982614	7	4	recovered	2011828		4D2023	4D2023				altitude_reply				21800		0																		0			0	
+259	89	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+260	89	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+261	89	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+262	89	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+263	90	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+264	90	F81076B30FFCF8	7	31	parity_addr	5994163																																			
+265	91	4CE9C074AF725F	7	9	parity_addr	14265290																																			
+266	92	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+267	93	8D4D20235871D448F787B3DC3687	14	17	valid	0			4D2023			11	airborne_position_baro				21725		0	9339	100275	1							5								0			0	
+268	93	C7B6D2DBE0CDB2B698F8EA69011A	14	24	parity_addr	14574425																																			
+269	94	5FFBD1FF9691E2	7	11	bad	8888229																																			
+270	94	722415FE9C6C08	7	14	parity_addr	10659202																																			
+271	94	0AFD59F73E7673	7	1	parity_addr	5873294																																			
+272	94	E1D8FFF4A31DDE	7	28	parity_addr	2320529																																			
+273	94	8D4D20235871C448C387C0BEB940	14	17	valid	0			4D2023			11	airborne_position_baro				21700		0	9313	100288	1							5								0			0	
+274	95	8D4D2023991090AC6880148D6A40	14	17	valid	0			4D2023			19	airborne_velocity														-1984		5								0			0	
+275	95	8D4D20232004D0F4CB1820B0EFD4	14	17	valid	0			4D2023	AMC421		4	identification	24															5								0			0	
+276	95	FC96FEEC38E059	7	31	parity_addr	12781119																																			
+277	96	8D4D20235871B4487F87CFF99030	14	17	valid	0			4D2023			11	airborne_position_baro				21675		0	9279	100303	1							5								0			0	
+278	96	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+279	96	8D4D2023587190B18D9B8069DEC2	14	17	valid	0			4D2023			11	airborne_position_baro				21625		0	22726	105344	0							5								0			0	
+280	96	8D4D202399108FAC687C14BFFA85	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+281	98	009F34F3638EEE	7	0	parity_addr	3177026																																			
+282	98	7D0CC074B226F3	7	15	parity_addr	3838056																																			
+283	99	9E70FF1D0C01519B7E0C22BED1FC	14	19	parity_addr	3825361																																			
+284	99	4565B8310B54B3	7	8	parity_addr	8198530																																			
+285	99	8D4D2023587144471F88120DB861	14	17	valid	0			4D2023			11	airborne_position_baro				21500		0	9103	100370	1							5								0			0	
+286	100	8D4D202399108FAC488014E9D893	14	17	valid	0			4D2023			19	airborne_velocity														-1984		5								0			0	
+287	100	A80010248017072FFFFCC1E82DB8	14	21	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+288	100	3FF1F027C253D3	7	7	parity_addr	13643651																																			
+289	100	20679B37FF4006	7	4	parity_addr	14183281																																			
+290	101	53FF3B2DB7C437	7	10	parity_addr	639457																																			
+291	101	DCEF05207F9B7B	7	27	parity_addr	12707062																																			
+292	101	0CFFF9271A7C7E	7	1	parity_addr	4095174																																			
+293	101	02316F667CFED3	7	0	parity_addr	3256878																																			
+294	102	088D87E67FC67E	7	1	parity_addr	15859147																																			
+295	102	AECB07F05792600F3017BBFFBDB4	14	21	parity_addr	2123383																																			
+296	102	9D49206750E321A06D338CB335B3	14	19	parity_addr	13717195																																			
+297	102	8D4D202399108FAC487C14FA86AC	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+298	102	4CE80F07FCF67F	7	9	parity_addr	12089448																																			
+299	102	19653DA6607BC0	7	3	parity_addr	16687711																																			
+300	103	1EEF828206F67D	7	3	parity_addr	9008101																																			
+301	103	6EE80806D3DBF3	7	13	parity_addr	14170117																																			
+302	104	7CB60EE6FF3FEC	7	15	parity_addr	12655216																																			
+303	105	DE8C3F6380E76F	7	27	parity_addr	14958654																																			
+304	105	9ECFFE46D39B70803E13B3FC011D	14	19	parity_addr	5520135																																			
+305	105	0D8ED5A6BFC4EF	7	1	parity_addr	13426024																																			
+306	106	1ECFFE27C6E653	7	3	parity_addr	3040509																																			
+307	106	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+308	106	8D4D2023587124468B882C84CBE2	14	17	valid	0			4D2023			11	airborne_position_baro				21450		0	9029	100396	1							5								0			0	
+309	106	8D4D202399108FAC487C14FA86AC	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+310	109	E12B2DFDC66EF6	7	28	parity_addr	11360149																																			
+311	109	0D9C7DE461EC3B	7	1	parity_addr	6974627																																			
+312	111	1FC602EA69011B	7	3	parity_addr	271339																																			
+313	111	077CDDCBA3CB27	7	0	parity_addr	13364740																																			
+314	111	8D4D2023586F30ACDD9C70541A0F	14	17	valid	0			4D2023			11	airborne_position_baro				21075		0	22126	105584	0							5								0			0	
+315	111	8D4D202399108FAC087C14707EFE	14	17	corrected	9307086	61		4D2023			19	airborne_velocity														-1920		5								0			0	
+316	111	4CCFF036D98EFC	7	9	parity_addr	7236325																																			
+317	111	23FE7ED37177E0	7	4	parity_addr	8529211																																			
+318	112	73C01A4DF61E7B	7	14	parity_addr	8225598																																			
+319	112	1E8901A3779860	7	3	parity_addr	8783389																																			
+320	112	0FB657F9DCFC37	7	1	parity_addr	15207694																																			
+321	113	F07824073C39BB	7	30	parity_addr	5854061																																			
+322	113	0DCD5000204900	7	1	parity_addr	11167823																																			
+323	113	A0000DB2B65A37277E1FC25DE2A0	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				21050																				0			0	
+324	114	43C100633801DB	7	8	parity_addr	11074784																																			
+325	115	8D4D2023586F20AC8B9C81E5B3EA	14	17	bad	14735360																																			
+326	115	00CC0003E72B2D	7	0	parity_addr	8497060																																			
+327	115	1CCD9DA3CCE55C	7	3	parity_addr	15524940																																			
+328	115	02E60DB1AC27F4	7	0	recovered	2011828		4D2023	4D2023				air_air_surveillance				21025		0																		0			0	
+329	115	8D4D2023586F00AC419C8E6EAC17	14	17	valid	0			4D2023			11	airborne_position_baro				21000		0	22048	105614	0							5								0			0	
+330	116	8D4D202399108FAC087C14707EFE	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+331	116	594D20237A55A6	7	11	bad	9307086																																			
+332	116	91D27F1CC5000204918F2D77B04A	14	18	bad	7915718																																			
+333	116	702FD7FFEFDB73	7	14	parity_addr	3291355																																			
+334	116	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+335	116	4CFEFDC4761F77	7	9	parity_addr	1886355																																			
+336	117	842030033209C1B1E6E1C03E0E75	14	16	parity_addr	11766354																																			
+337	117	63C1FCF13BD70F	7	12	parity_addr	10455062																																			
+338	117	8D4D2023586DF0ABFB9C99B935C8	14	17	valid	0			4D2023			11	airborne_position_baro				20975		0	22013	105625	0							5								0			0	
+339	117	8D4D202399108FAC087C14707EFE	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+340	118	08CFE1F6533E7D	7	1	parity_addr	9260698																																			
+341	119	D1DF7B873B87A3	7	26	parity_addr	12310620																																			
+342	120	1A887F36C31847	7	3	parity_addr	271814																																			
+343	120	48ECE0F076D07E	7	9	parity_addr	12411797																																			
+344	120	1CC86476D29A6C	7	3	parity_addr	6496666																																			
+345	120	0DA7BEC0CC5771	7	1	parity_addr	16404258																																			
+346	120	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+347	121	8D4D2023586DE0ABB39CA8931613	14	17	valid	0			4D2023			11	airborne_position_baro				20950		0	21977	105640	0							5								0			0	
+348	121	8D4D202399108FAC087C14707EFE	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+349	121	BF4FE427FEB3CF	7	23	parity_addr	5841615																																			
+350	122	18DB490CD003B0	7	3	parity_addr	10030261																																			
+351	122	8D4D2023586DC44225890EC0E540	14	17	valid	0			4D2023			11	airborne_position_baro				20900		0	8466	100622	1							5								0			0	
+352	122	8D4D202399108FABE87C14860C91	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+353	123	00E65D4D20237A	7	0	parity_addr	15320682																																			
+354	123	8D4D2023586DB441DD891CB93E18	14	17	valid	0			4D2023			11	airborne_position_baro				20875		0	8430	100636	1							5								0			0	
+355	123	8D4D202399108FABE87C14860C91	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+356	123	26D27D84FFF5FC	7	4	parity_addr	13785799																																			
+357	124	0CCF8186DA0E43	7	1	parity_addr	3582739																																			
+358	125	C56DB0315C64B0AA4FCC526670CC	14	24	parity_addr	5467913																																			
+359	125	8D4D202399108FABE87C14860C91	14	17	valid	0			4D2023			19	airborne_velocity														-1920		5								0			0	
+360	126	D946F1871CF529	7	27	parity_addr	8261599																																			
+361	126	594D20637255A6	7	11	bad	2070897																																			
+362	126	0C8FC0B48E9D5B	7	1	parity_addr	4455778																																			
+363	126	8D4D2023586D90AA979CE05A73C1	14	17	valid	0			4D2023			11	airborne_position_baro				20825		0	21835	105696	0							5								0			0	
+364	127	8D4D202399108FABE87814BE3A91	14	17	valid	0			4D2023			19	airborne_velocity														-1856		5								0			0	
+365	127	D8C9CB05ADDC63	7	27	parity_addr	9131968																																			
+366	128	2CCFE9C68BD84A	7	5	parity_addr	15108226																																			
+367	129	CD4D20235C6D74	7	25	parity_addr	12874487																																			
+368	129	8D4D202399108FABE87814BE3A91	14	17	valid	0			4D2023			19	airborne_velocity														-1856		5								0			0	
+369	129	0CEF80F6CB5E7B	7	1	parity_addr	1888640																																			
+370	130	1049C002E6E757	7	2	parity_addr	10952802																																			
+371	130	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+372	131	8D4D2023586D60AA039D03471653	14	17	valid	0			4D2023			11	airborne_position_baro				20750		0	21761	105731	0							5								0			0	
+373	131	8D4D202399108FABC87414B31CB8	14	17	valid	0			4D2023			19	airborne_velocity														-1792		5								0			0	
+374	131	1F800EF1AEC1B2	7	3	parity_addr	13063483																																			
+375	132	1FE127C18CBDFE	7	3	parity_addr	13887435																																			
+376	132	1EE806868B9841	7	3	parity_addr	3282740																																			
+377	133	8D4D20232004D0F4CB1820B0EFD4	14	17	valid	0			4D2023	AMC421		4	identification	24															5								0			0	
+378	133	0CEFC633F8F67E	7	1	parity_addr	6838659																																			
+379	133	3DCCE00D26DE62	7	7	parity_addr	345206																																			
+380	133	A3D03EF5719CFDF3D26DC7E73CDB	14	20	parity_addr	1671559																																			
+381	134	13DA4DF7FFFD9E	7	2	parity_addr	106994																																			
+382	134	E5B9677E8017D7	7	28	parity_addr	3135849																																			
+383	134	8D4D202399108FABC87414B31CB8	14	17	valid	0			4D2023			19	airborne_velocity														-1792		5								0			0	
+384	135	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+385	136	8D4D2023586D40A96F9D1BCCAFA5	14	17	valid	0			4D2023			11	airborne_position_baro				20700		0	21687	105755	0							5								0			0	
+386	136	8D4D202399108FABC87414B31CB8	14	17	valid	0			4D2023			19	airborne_velocity														-1792		5								0			0	
+387	137	8D4D2023586D30A9359D297C62BE	14	17	valid	0			4D2023			11	airborne_position_baro				20675		0	21658	105769	0							5								0			0	
+388	138	9959606731319CAB98E435A034E4	14	19	parity_addr	8205953																																			
+389	138	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+390	138	4EC801C6CA5E7F	7	9	parity_addr	10477203																																			
+391	139	6FBFE6CE77048F	7	13	parity_addr	15010300																																			
+392	139	4F8CE9FB4AED87	7	9	parity_addr	14619106																																			
+393	140	CCCF913798465C	7	25	parity_addr	11404668																																			
+394	140	8D4D2023586D143FB3898AB06FA9	14	17	valid	0			4D2023			11	airborne_position_baro				20625		0	8153	100746	1							5								0			0	
+395	140	F878E565BFB8CD	7	31	parity_addr	2149662																																			
+396	141	59492066725524	7	11	bad	12057583																																			
+397	141	A0000D912004D0F4CB1820CC1BB2	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				20625																				0			0	
+398	141	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+399	141	A0000D9100000000000000F871AB	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				20625																				0			0	
+400	141	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+401	141	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+402	141	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+403	142	A80010248057052F3FFCBF3B2B29	14	21	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+404	142	A0000D91B65A39273E47C88EA82D	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				20625																				0			0	
+405	143	8CCFF0104FD66F87BFCB23888D13	14	17	bad	16371507																																			
+406	144	DC924DE7E0049B	7	27	parity_addr	4086111																																			
+407	144	0EEF31E7C0C67F	7	1	parity_addr	16173601																																			
+408	145	8D4D2023586D00A8AF9D42B9FA54	14	17	valid	0			4D2023			11	airborne_position_baro				20600		0	21591	105794	0							5								0			0	
+409	145	8D4D202399108EABA8701447A40D	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+410	145	DA5C78371FE523	7	27	parity_addr	10666030																																			
+411	146	1EEFC3064AFC60	7	3	parity_addr	10918485																																			
+412	146	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+413	147	8D4D2023586BF43F2589A1B23E62	14	17	valid	0			4D2023			11	airborne_position_baro				20575		0	8082	100769	1							5								0			0	
+414	148	3D64FF07A87CD0	7	7	parity_addr	12915732																																			
+415	148	1E93FF9C4B696C	7	3	parity_addr	4975389																																			
+416	148	8D4D202399108EABA8701447A40D	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+417	148	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+418	149	D8C8F314749F69	7	27	parity_addr	1301177																																			
+419	149	DEEDFFF6425F70	7	27	parity_addr	5478740																																			
+420	149	8D4D2023586BD43E9B89C0354B32	14	17	valid	0			4D2023			11	airborne_position_baro				20525		0	8013	100800	1							5								0			0	
+421	149	8D4D202399108EABA8701447A40D	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+422	150	FDCCE1F8B8ECEF	7	31	parity_addr	13849399																																			
+423	150	08F8E626D21F71	7	1	parity_addr	13666016																																			
+424	150	F31F39DE770F03	7	30	parity_addr	16328049																																			
+425	152	8D4D2023586BC43E5989CA7EDFD8	14	17	valid	0			4D2023			11	airborne_position_baro				20500		0	7980	100810	1							5								0			0	
+426	152	8D4D202399108EAB88701402D824	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+427	152	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+428	153	C0ED69E457D17781B2B693EF3CCF	14	24	parity_addr	8142383																																			
+429	153	5B4961EB7C5876	7	11	bad	1286914																																			
+430	154	8D4D202399108EAB88701402D824	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+431	154	93B2F761C0B2B6E3F001E399999C	14	18	bad	14172816																																			
+432	154	8D4D20232004D0F4CB1820B0EFD4	14	17	valid	0			4D2023	AMC421		4	identification	24															5								0			0	
+433	154	8D4D2023586B943DBB89ECCF0A84	14	17	valid	0			4D2023			11	airborne_position_baro				20425		0	7901	100844	1							5								0			0	
+434	155	8D4D202399108EAB88701402D824	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+435	155	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+436	155	FF8F39596FEE33	7	31	parity_addr	8237612																																			
+437	156	3EB36C3FF03498	7	7	parity_addr	16254663																																			
+438	157	7FCFA2FF79B6B4	7	15	parity_addr	4066303																																			
+439	157	8D4D2023586B70A6639DB58F1EE7	14	17	valid	0			4D2023			11	airborne_position_baro				20375		0	21297	105909	0							5								0			0	
+440	158	594D20637A55A4	7	11	bad	7415650																																			
+441	158	E510EFEEDB0601	7	28	parity_addr	10539264																																			
+442	159	8D4D202399108EAB6870142758F2	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+443	159	8D4D2023586B543CB98A1FAF2586	14	17	valid	0			4D2023			11	airborne_position_baro				20325		0	7772	100895	1							5								0			0	
+444	159	8D4D202399108DAB6870142247A0	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+445	160	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+446	161	8D4D2023586B30A5A99DDF267240	14	17	valid	0			4D2023			11	airborne_position_baro				20275		0	21204	105951	0							5								0			0	
+447	161	8D4D202399108DAB6870142247A0	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+448	161	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+449	161	20000D3375D886	7	4	recovered	2011828		4D2023	4D2023				altitude_reply				20275		0																		0			0	
+450	161	280010248C796B	7	5	recovered	2011828		4D2023	4D2023		0112		identity_reply																								0			0	
+451	161	2800106498F14A	7	5	parity_addr	8181386																																			
+452	161	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+453	162	6DA5BF7F3E032F	7	13	parity_addr	7695519																																			
+454	162	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+455	162	0FB00CF617849A	7	1	parity_addr	7953951																																			
+456	162	4689E07037A20E	7	8	parity_addr	6336356																																			
+457	162	F9236F6781695B	7	31	parity_addr	14014406																																			
+458	162	CCEE01F612FE5A	7	25	parity_addr	11067642																																			
+459	163	1C88279692DE6F	7	3	parity_addr	6086958																																			
+460	163	F4CC2DAB63BF06	7	30	parity_addr	13472062																																			
+461	164	8D4D202399108DAB687014224FA0	14	17	bad	7367680																																			
+462	165	A0000D319D500031E40000E5AA3B	14	20	recovered	2011828		4D2023	4D2023				altitude_reply				20225																				0			0	
+463	165	D4AC001836C053	7	26	parity_addr	15930785																																			
+464	165	F24D9E0F2712E5	7	30	parity_addr	10886028																																			
+465	167	1ECFCFE6DA4BE0	7	3	parity_addr	5611675																																			
+466	167	8D4D2023586B10A5199DF6CB52C1	14	17	valid	0			4D2023			11	airborne_position_baro				20225		0	21132	105974	0							5								0			0	
+467	167	8D4D202399108DAB487014673B89	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+468	169	0EE68D4D202358	7	1	parity_addr	4875796																																			
+469	169	8D4D202399108DAB487014673B89	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+470	169	1ECDF17642DB40	7	3	parity_addr	16458991																																			
+471	170	CECB8F86C25A60	7	25	parity_addr	8272463																																			
+472	171	64B1C1E6DB091B	7	12	parity_addr	704248																																			
+473	171	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+474	171	3205D8347DD0C6	7	6	parity_addr	16180342																																			
+475	171	2B79096246A690	7	5	parity_addr	6594686																																			
+476	171	8D4D202399108DAB487014673B89	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+477	172	694CC6E7BBFED0	7	13	parity_addr	8101886																																			
+478	172	449B6CBDFDE127	7	8	parity_addr	11452395																																			
+479	173	C0B596C0C6C01161D98D70C2619F	14	24	parity_addr	14087445																																			
+480	173	BFB64C64687F9E	7	23	parity_addr	8372827																																			
+481	174	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+482	174	C4669B07C7EE78D4D20235869A0A	14	24	parity_addr	16086483																																			
+483	174	8D4D202399108CAB287014ABB53C	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+484	176	BE08FFF926906F	7	23	parity_addr	3449018																																			
+485	176	E0990EF03BFC78	7	28	parity_addr	1234867																																			
+486	177	8D4D2023586990A3359E5A546080	14	17	valid	0			4D2023			11	airborne_position_baro				20025		0	20890	106074	0							5								0			0	
+487	177	8D4D202399108CAB287014ABB53C	14	17	valid	0			4D2023			19	airborne_velocity														-1728		5								0			0	
+488	177	63BE606EE3BC2D	7	12	parity_addr	14531551																																			
+489	178	5D4D20237A55A6	7	11	valid	0			4D2023				all_call_reply																5	0							0			0	
+490	178	B82FA77452FA77	7	23	parity_addr	5659158																																			

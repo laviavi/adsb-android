@@ -1,0 +1,532 @@
+package com.laviavi.adsbandroid.ui.map
+
+import android.view.MotionEvent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.Remove
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.laviavi.adsbandroid.pipeline.AppConfig
+import com.laviavi.adsbandroid.ui.MainViewModel
+import com.laviavi.adsbandroid.ui.model.MapMarker
+import com.laviavi.adsbandroid.ui.theme.AdsbColors
+import com.laviavi.adsbandroid.ui.theme.AdsbDimens
+import com.laviavi.adsbandroid.units.DistanceUnit
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Overlay
+
+/**
+ * Zoom steps a named range scale rather than free zoom levels: the operator thinks
+ * in "how far can I see", not in tile zoom. Each step names the two rings drawn.
+ */
+enum class RangeStep(val innerMi: Double, val outerMi: Double) {
+    R6_12(6.0, 12.0),
+    R12_25(12.0, 25.0),
+    R25_50(25.0, 50.0),
+    R50_100(50.0, 100.0);
+
+    /** The scale is named in statute miles; the overlay works in nautical miles. */
+    val innerNm: Double get() = DistanceUnit.MILES.toNm(innerMi)
+    val outerNm: Double get() = DistanceUnit.MILES.toNm(outerMi)
+
+    companion object {
+        val DEFAULT = R25_50
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MapScreen(
+    viewModel: MainViewModel,
+    onAircraftClick: (String) -> Unit,
+    onConfigChange: (AppConfig) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val density = LocalDensity.current.density
+    val markers by viewModel.mapMarkers.collectAsStateWithLifecycle()
+    val config by viewModel.config.collectAsStateWithLifecycle()
+
+    val configuration = LocalConfiguration.current
+    val minDimPx = minOf(configuration.screenWidthDp, configuration.screenHeightDp) * density.toDouble()
+
+    var rangeStep by rememberSaveable { mutableStateOf(RangeStep.DEFAULT) }
+    var followObserver by rememberSaveable { mutableStateOf(true) }
+    var layersOpen by remember { mutableStateOf(false) }
+    var selectedIcao by rememberSaveable { mutableStateOf<String?>(null) }
+    var shownOfTotal by remember { mutableStateOf(0 to 0) }
+
+    val observer = remember(config.observerLatitude, config.observerLongitude) {
+        GeoPoint(config.observerLatitude, config.observerLongitude)
+    }
+    val selected = remember(markers, selectedIcao) {
+        selectedIcao?.let { id -> markers.find { it.icao == id } }
+    }
+
+    // One MapView for the lifetime of the destination; osmdroid is configured once
+    // with an app-private tile cache so no storage permission is ever needed.
+    val mapView = remember {
+        // load() must run before anything touches the tile provider — without it
+        // osmdroid has no cache path and no user agent, and every tile request is
+        // dropped, leaving a blank map with no error.
+        Configuration.getInstance().apply {
+            load(context, context.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE))
+            userAgentValue = context.packageName
+            osmdroidBasePath = context.filesDir
+            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles").apply { mkdirs() }
+        }
+        MapView(context).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            // Real value applied by the offlineMode effect below; this only sets the
+            // state before the first draw.
+            setUseDataConnection(!config.offlineMode)
+            zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+            controller.setZoom(computeZoom(RangeStep.DEFAULT.outerNm, minDimPx, observer.latitude))
+            controller.setCenter(observer)
+            // The console is a dark instrument; Mapnik ships light. Inverting and
+            // desaturating the tiles keeps roads and coastlines legible without
+            // competing with the marker palette.
+            overlayManager.tilesOverlay.setColorFilter(darkTileFilter())
+        }
+    }
+    val overlay = remember { AircraftOverlay(density) }
+
+    DisposableEffect(Unit) {
+        onDispose { mapView.onDetach() }
+    }
+
+    // Offline mode stops tile downloads; already-cached tiles still render, so the
+    // map degrades to whatever has been visited rather than going blank. Applied in
+    // its own effect because the MapView is remembered for the destination's whole
+    // lifetime — the constructor above runs once and would never see a later toggle.
+    LaunchedEffect(config.offlineMode) {
+        mapView.setUseDataConnection(!config.offlineMode)
+        mapView.invalidate()
+    }
+
+    // Touch overlay: a tap selects the nearest marker, a drag disables following.
+    DisposableEffect(mapView, overlay) {
+        val touch = object : Overlay() {
+            override fun onSingleTapConfirmed(e: MotionEvent, m: MapView): Boolean {
+                val hit = overlay.hitTest(m, e.x, e.y)
+                // Re-tapping the selected marker is a no-op, so panning with a
+                // selection active can never deselect by accident.
+                if (hit != null) {
+                    if (hit.icao != selectedIcao) selectedIcao = hit.icao
+                } else {
+                    selectedIcao = null
+                }
+                m.invalidate()
+                return true
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float, m: MapView,
+            ): Boolean {
+                if (followObserver) followObserver = false
+                return false
+            }
+        }
+        mapView.overlays.add(overlay)
+        mapView.overlays.add(touch)
+        onDispose {
+            mapView.overlays.remove(touch)
+            mapView.overlays.remove(overlay)
+        }
+    }
+
+    // Marker updates are a field assignment plus invalidate — never an overlay rebuild.
+    LaunchedEffect(markers, selectedIcao, config, rangeStep, observer) {
+        overlay.markers = markers
+        overlay.observer = observer
+        overlay.selectedIcao = selectedIcao
+        overlay.showRangeRings = config.mapShowRangeRings
+        overlay.showLabels = config.mapShowLabels
+        overlay.showGroundTraffic = config.mapShowGroundTraffic
+        overlay.ringRadiiNm = listOf(rangeStep.innerNm, rangeStep.outerNm)
+        overlay.ringLabels = listOf(
+            config.distanceUnit.formatWhole(rangeStep.innerNm),
+            config.distanceUnit.formatWhole(rangeStep.outerNm),
+        )
+        overlay.onDecimated = { shown, total -> shownOfTotal = shown to total }
+        mapView.invalidate()
+    }
+
+    LaunchedEffect(followObserver, observer, rangeStep) {
+        if (followObserver) mapView.controller.animateTo(observer)
+    }
+    LaunchedEffect(rangeStep) {
+        mapView.controller.zoomTo(computeZoom(rangeStep.outerNm, minDimPx, observer.latitude), 300L)
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(AdsbColors.Background)) {
+        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+
+        MarkerLegend(modifier = Modifier.align(Alignment.TopStart).padding(AdsbDimens.SpacingMd))
+
+        // The decimation cap is never silent.
+        if (shownOfTotal.first < shownOfTotal.second) {
+            DecimationChip(
+                shown = shownOfTotal.first,
+                total = shownOfTotal.second,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp),
+            )
+        }
+
+        MapControls(
+            followActive = followObserver,
+            layersActive = layersOpen,
+            canZoomIn = rangeStep.ordinal > 0,
+            canZoomOut = rangeStep.ordinal < RangeStep.entries.lastIndex,
+            onFollow = { followObserver = true; mapView.controller.animateTo(observer) },
+            onLayers = { layersOpen = !layersOpen },
+            onZoomIn = { if (rangeStep.ordinal > 0) rangeStep = RangeStep.entries[rangeStep.ordinal - 1] },
+            onZoomOut = {
+                if (rangeStep.ordinal < RangeStep.entries.lastIndex)
+                    rangeStep = RangeStep.entries[rangeStep.ordinal + 1]
+            },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = AdsbDimens.SpacingMd, bottom = 96.dp),
+        )
+
+        if (layersOpen) {
+            LayersPanel(
+                config = config,
+                rangeLabel = config.distanceUnit.formatWhole(rangeStep.innerNm),
+                onConfigChange = onConfigChange,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 68.dp, bottom = 96.dp),
+            )
+        }
+
+        selected?.let { m ->
+            SelectionSheet(
+                marker = m,
+                onExpand = { onAircraftClick(m.icao) },
+                onDismiss = { selectedIcao = null; mapView.invalidate() },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
+}
+
+/**
+ * Inverts tile luminance and drops saturation, turning the light Mapnik raster
+ * into a dark basemap that sits behind the marker palette instead of fighting it.
+ */
+private fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
+    val invert = android.graphics.ColorMatrix(
+        floatArrayOf(
+            -1f, 0f, 0f, 0f, 255f,
+            0f, -1f, 0f, 0f, 255f,
+            0f, 0f, -1f, 0f, 255f,
+            0f, 0f, 0f, 1f, 0f,
+        )
+    )
+    // Desaturate *before* inverting. The other order inverts full-strength hues
+    // first, which turns the blue ocean brown and the parkland magenta; flattening
+    // to near-grey first means inversion only moves luminance.
+    val desaturate = android.graphics.ColorMatrix().apply { setSaturation(0f) }
+    desaturate.postConcat(invert)
+    return android.graphics.ColorMatrixColorFilter(desaturate)
+}
+
+/**
+ * Tile zoom at which the outer ring spans ~80 % of the shorter screen edge.
+ *
+ * Works in physical pixels, not dp: osmdroid's ground resolution is metres per
+ * *pixel*, so feeding it dp on a 2.75x-density screen zooms out by more than a
+ * full level and the rings shrink to a dot.
+ */
+private fun computeZoom(outerNm: Double, minDimPx: Double, latitude: Double): Double {
+    val targetPx = minDimPx * 0.8
+    val metres = outerNm * 1852.0 * 2
+    val metresPerPixel = metres / targetPx
+    val equatorial = 156543.03392 * kotlin.math.cos(Math.toRadians(latitude))
+    return (Math.log(equatorial / metresPerPixel) / Math.log(2.0)).coerceIn(3.0, 18.0)
+}
+
+@Composable
+private fun MarkerLegend(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = AdsbColors.Surface.copy(alpha = 0.9f),
+        shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
+        border = BorderStroke(1.dp, AdsbColors.Outline),
+    ) {
+        Text(
+            "✈ airborne · ■ ground · ● no track",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            fontSize = 11.sp,
+            color = AdsbColors.TextSecondary,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun DecimationChip(shown: Int, total: Int, modifier: Modifier = Modifier) {
+    var explain by remember { mutableStateOf(false) }
+    Surface(
+        modifier = modifier.clickable { explain = true },
+        color = AdsbColors.WarningFill,
+        shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
+        border = BorderStroke(1.dp, AdsbColors.Warning.copy(alpha = 0.5f)),
+    ) {
+        Text(
+            "showing $shown of $total",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            color = AdsbColors.Warning,
+        )
+    }
+    if (explain) {
+        AlertDialog(
+            onDismissRequest = { explain = false },
+            title = { Text("Showing $shown of $total aircrafts") },
+            text = {
+                Text(
+                    "Above ${AircraftOverlay.MAX_DRAWN_MARKERS} markers the map draws an evenly " +
+                        "spaced subset so panning stays smooth. Every aircraft is still tracked and " +
+                        "listed on the Live screen — only the drawing is reduced. Zoom in, or turn " +
+                        "off ground traffic, to see individual markers again."
+                )
+            },
+            confirmButton = { TextButton(onClick = { explain = false }) { Text("OK") } },
+        )
+    }
+}
+
+@Composable
+private fun MapControls(
+    followActive: Boolean,
+    layersActive: Boolean,
+    canZoomIn: Boolean,
+    canZoomOut: Boolean,
+    onFollow: () -> Unit,
+    onLayers: () -> Unit,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Width is pinned to the button size: without it the Column stretches to the
+    // full parent width and the stack lands against the opposite edge.
+    Column(
+        modifier = modifier.width(44.dp),
+        verticalArrangement = Arrangement.spacedBy(AdsbDimens.SpacingSm),
+    ) {
+        ControlButton(Icons.Outlined.MyLocation, "Follow observer", followActive, true, onFollow)
+        ControlButton(Icons.Outlined.Layers, "Layers", layersActive, true, onLayers)
+        // Joined pair: each end disables at its range limit.
+        Column(
+            modifier = Modifier
+                .width(44.dp)
+                .clip(RoundedCornerShape(AdsbDimens.CardCornerRadius))
+                .border(1.dp, AdsbColors.Outline, RoundedCornerShape(AdsbDimens.CardCornerRadius)),
+        ) {
+            ControlButton(Icons.Outlined.Add, "Zoom in", false, canZoomIn, onZoomIn, bordered = false)
+            HorizontalDivider(color = AdsbColors.Outline)
+            ControlButton(Icons.Outlined.Remove, "Zoom out", false, canZoomOut, onZoomOut, bordered = false)
+        }
+    }
+}
+
+@Composable
+private fun ControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    bordered: Boolean = true,
+) {
+    val shape = RoundedCornerShape(AdsbDimens.CardCornerRadius)
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .then(if (bordered) Modifier.clip(shape).border(1.dp, AdsbColors.Outline, shape) else Modifier)
+            .background(AdsbColors.Surface.copy(alpha = 0.95f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = when {
+                !enabled -> AdsbColors.TextDisabled
+                active -> AdsbColors.Primary
+                else -> AdsbColors.TextSecondary
+            },
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun LayersPanel(
+    config: AppConfig,
+    rangeLabel: String,
+    onConfigChange: (AppConfig) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.width(186.dp),
+        color = AdsbColors.Surface.copy(alpha = 0.97f),
+        shape = RoundedCornerShape(AdsbDimens.CardCornerRadius),
+        border = BorderStroke(1.dp, AdsbColors.Outline),
+    ) {
+        Column(modifier = Modifier.padding(AdsbDimens.CardPadding)) {
+            Text(
+                "LAYERS",
+                fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.W600,
+                letterSpacing = 1.4.sp, color = AdsbColors.Primary,
+            )
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            CheckRow("Range rings", config.mapShowRangeRings) {
+                onConfigChange(config.copy(mapShowRangeRings = it))
+            }
+            CheckRow("Callsign labels", config.mapShowLabels) {
+                onConfigChange(config.copy(mapShowLabels = it))
+            }
+            CheckRow("Ground traffic", config.mapShowGroundTraffic) {
+                onConfigChange(config.copy(mapShowGroundTraffic = it))
+            }
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            Text("TRAILS", fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                letterSpacing = 1.4.sp, color = AdsbColors.Primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+                AppConfig.TRAIL_LENGTHS.forEach { n ->
+                    val selected = config.mapTrailLength == n
+                    Text(
+                        if (n == 0) "off" else "$n",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        color = if (selected) AdsbColors.OnPrimary else AdsbColors.TextSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(AdsbDimens.PillCornerRadius))
+                            .background(if (selected) AdsbColors.Primary else Color.Transparent)
+                            .border(
+                                1.dp,
+                                if (selected) Color.Transparent else AdsbColors.Outline,
+                                RoundedCornerShape(AdsbDimens.PillCornerRadius),
+                            )
+                            .clickable { onConfigChange(config.copy(mapTrailLength = n)) }
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
+            }
+
+            HorizontalDivider(color = AdsbColors.SurfaceElevated, modifier = Modifier.padding(vertical = 8.dp))
+            Text(
+                "Range $rangeLabel",
+                fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.TextDisabled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onChange(!checked) }
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+            contentDescription = null,
+            tint = if (checked) AdsbColors.Primary else AdsbColors.TextDisabled,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(label, fontSize = 12.sp, color = AdsbColors.TextPrimary)
+    }
+}
+
+/**
+ * Peek detent only. Dragging up hands off to the shared aircraft-detail surface —
+ * there is one detail implementation, not a second one living on the map.
+ */
+@Composable
+private fun SelectionSheet(
+    marker: MapMarker,
+    onExpand: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onExpand),
+        color = AdsbColors.Surface,
+        shape = RoundedCornerShape(topStart = AdsbDimens.SheetCornerRadius, topEnd = AdsbDimens.SheetCornerRadius),
+        border = BorderStroke(1.dp, AdsbColors.Outline),
+    ) {
+        Column(modifier = Modifier.padding(AdsbDimens.ScreenGutter)) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(bottom = 10.dp)
+                    .size(width = 34.dp, height = 4.dp)
+                    .background(AdsbColors.Outline, RoundedCornerShape(2.dp)),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    marker.icao,
+                    fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.W600,
+                    color = AdsbColors.Primary,
+                )
+                marker.callsign?.let {
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
+                }
+                Spacer(Modifier.weight(1f))
+                marker.distanceBearing?.let {
+                    Text(it, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = AdsbColors.TextSecondary)
+                }
+            }
+            Text(
+                marker.detailLine,
+                fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = AdsbColors.TextSecondary,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = onDismiss, contentPadding = PaddingValues(0.dp)) {
+                Text("Dismiss", fontSize = 12.sp, color = AdsbColors.TextDisabled)
+            }
+        }
+    }
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Realtek RTL2838 — R820T/R828D (most common) -->
+    <usb-device vendor-id="3034" product-id="10296" />
+    <!-- Realtek RTL2832U -->
+    <usb-device vendor-id="3034" product-id="10290" />
+    <!-- Realtek RTL2837 -->
+    <usb-device vendor-id="3034" product-id="10295" />
+    <!-- Realtek RTL2843 -->
+    <usb-device vendor-id="3034" product-id="10307" />
+</resources>

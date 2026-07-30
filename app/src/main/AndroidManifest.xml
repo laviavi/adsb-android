@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
+    <!-- Required on Android 11+ to query other app packages -->
+    <queries>
+        <package android:name="marto.rtl_tcp_andro" />
+    </queries>
+
+    <application
+        android:name=".AdsbApplication"
+        android:allowBackup="true"
+        android:label="ADS-B Receiver"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AdsbAndroid">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Android shows its own permission dialog when the dongle is plugged in.
+                 This fires regardless of prior in-app denials, so the user is never
+                 stuck in a state where the prompt stops appearing. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+        </activity>
+
+        <!--
+            Transparent trampoline Activity for USB driver Intent result.
+            Theme.NoDisplay means zero UI — invisible to the user.
+        -->
+        <activity
+            android:name=".capture.SdrSourceActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <service
+            android:name=".pipeline.PipelineService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|location" />
+
+        <!--
+            Auto-launch when RTL-SDR dongle is plugged in.
+            Fires com.sdrtouch.rtlsdr.SDR_DEVICE_ATTACHED broadcast.
+        -->
+        <receiver
+            android:name=".capture.UsbHotplugReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sdrtouch.rtlsdr.SDR_DEVICE_ATTACHED" />
+                <action android:name="com.sdrtouch.rtlsdr.SDR_DEVICE_DETACHED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

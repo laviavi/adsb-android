@@ -1,0 +1,2 @@
+checkpoint_s	icao	callsign	squawk	emitter_category	latitude	longitude	altitude_baro_ft	altitude_gnss_ft	on_ground	ground_speed_kts	track_deg	heading_deg	airspeed_kts	vertical_rate_fpm	speed_type	version	nac_p	nac_v	sil	tcas_sl	tcas_ra_active	tcas_ra_text	tcas_ra_complement	tcas_ra_terminated	tcas_target_icao	tcas_event_count	interrogator_ids	msg_count	valid_count	bad_crc_count	corrected_count	first_seen_ms	last_seen_ms	last_position_ms
+10	4D2023	AMC421	0112	24	36.956268	13.858318	20025		0					-1728							0			0		0	0	220	182	0	2	0	177	176

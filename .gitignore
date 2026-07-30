@@ -1,0 +1,17 @@
+# Archived snapshots — not part of the repo
+adsb-android-v*/
+
+# Build outputs
+build/
+app/build/
+core/receiver/build/
+.gradle/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Claude session
+.claude/settings.local.json
+C\:*/
