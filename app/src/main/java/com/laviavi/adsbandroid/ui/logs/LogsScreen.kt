@@ -29,6 +29,7 @@ private enum class LogTab(val label: String) { EVENTS("Events"), HISTORY("Histor
 fun LogsScreen(
     viewModel: MainViewModel,
     onClearHistory: () -> Unit,
+    onShareHistory: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(LogTab.EVENTS) }
     val events by viewModel.diagnosticEvents.collectAsStateWithLifecycle()
@@ -51,7 +52,7 @@ fun LogsScreen(
 
         when (tab) {
             LogTab.EVENTS -> EventsList(events)
-            LogTab.HISTORY -> HistoryScreen(entries = history, onClear = onClearHistory)
+            LogTab.HISTORY -> HistoryScreen(entries = history, onClear = onClearHistory, onShare = onShareHistory)
         }
     }
 }

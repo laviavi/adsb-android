@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -38,6 +39,7 @@ import com.laviavi.adsbandroid.ui.navigation.AdsbDestination
 import com.laviavi.adsbandroid.ui.offline.OfflineMapsScreen
 import com.laviavi.adsbandroid.ui.receiver.ReceiverScreen
 import com.laviavi.adsbandroid.ui.settings.SettingsScreen
+import com.laviavi.adsbandroid.ui.stats.StatsScreen
 import com.laviavi.adsbandroid.ui.text.LiveScreen
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbTheme
@@ -59,8 +61,10 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch { service.stats.stats.collect { viewModel.onStatsUpdate(it) } }
             lifecycleScope.launch { service.sourceState.collect { viewModel.onSourceState(it) } }
             lifecycleScope.launch { service.config.collect { viewModel.onConfigUpdate(it) } }
+            lifecycleScope.launch { service.resolvedObserverPosition.collect { viewModel.onObserverPosition(it) } }
             lifecycleScope.launch { service.gainOptions.collect { viewModel.onGainOptions(it) } }
             lifecycleScope.launch { service.history.collect { viewModel.onHistoryUpdate(it) } }
+            lifecycleScope.launch { service.visits.collect { viewModel.onVisitsUpdate(it) } }
             lifecycleScope.launch { service.droppedBatches.collect { viewModel.onDroppedBatches(it) } }
             lifecycleScope.launch { service.coverage.collect { viewModel.onCoverage(it) } }
         }
@@ -88,6 +92,13 @@ class MainActivity : ComponentActivity() {
                     onStop = { pipelineService?.stopPipeline() },
                     onReconnect = { pipelineService?.reconnect() },
                     onClearHistory = { pipelineService?.clearHistory() },
+                    onShareHistory = {
+                        pipelineService?.exportHistoryCsv { file ->
+                            if (file != null) shareCsv(this@MainActivity, file)
+                        }
+                    },
+                    onResetCounters = { pipelineService?.resetStatsCounters() },
+                    onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
                     driverInstalled = UsbHotplugReceiver.isDriverInstalled(this@MainActivity),
                 )
             }
@@ -103,6 +114,20 @@ class MainActivity : ComponentActivity() {
 /** Sub-screen route, reached from Settings rather than the navigation bar. */
 private const val ROUTE_OFFLINE_MAPS = "offline_maps"
 
+/** Sub-screen route, reached from Settings — same reasoning as [ROUTE_OFFLINE_MAPS]. */
+private const val ROUTE_STATS = "stats"
+
+/** Opens the system share sheet for a CSV written under external app storage. */
+private fun shareCsv(context: android.content.Context, file: java.io.File) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/csv"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, "Share history"))
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AdsbScaffold(
@@ -112,6 +137,9 @@ private fun AdsbScaffold(
     onStop: () -> Unit,
     onReconnect: () -> Unit,
     onClearHistory: () -> Unit,
+    onShareHistory: () -> Unit,
+    onResetCounters: () -> Unit,
+    onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
     driverInstalled: Boolean,
 ) {
     val navController = rememberNavController()
@@ -124,6 +152,11 @@ private fun AdsbScaffold(
 
     // Detail sheet state
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    // Requests ACCESS_FINE_LOCATION; result isn't consumed here because the
+    // Settings screens already re-read the grant state on every recomposition.
+    val locationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     NavigationSuiteScaffold(
         navigationSuiteItems = {
@@ -152,7 +185,8 @@ private fun AdsbScaffold(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(AdsbColors.Background),
+                .background(AdsbColors.Background)
+                .statusBarsPadding(),
         ) {
             StatusStrip(
                 status = receiverStatus,
@@ -195,6 +229,7 @@ private fun AdsbScaffold(
                         onStart = onStart,
                         onStop = onStop,
                         onReconnect = onReconnect,
+                        onResetCounters = onResetCounters,
                     )
                 }
                 composable(AdsbDestination.MAP.route) {
@@ -216,6 +251,7 @@ private fun AdsbScaffold(
                     LogsScreen(
                         viewModel = viewModel,
                         onClearHistory = onClearHistory,
+                        onShareHistory = onShareHistory,
                     )
                 }
                 composable(AdsbDestination.SETTINGS.route) {
@@ -224,6 +260,18 @@ private fun AdsbScaffold(
                         driverInstalled = driverInstalled,
                         onConfigChange = onConfigChange,
                         onOpenOfflineMaps = { navController.navigate(ROUTE_OFFLINE_MAPS) },
+                        onOpenStats = { navController.navigate(ROUTE_STATS) },
+                        onUpdateGps = onUpdateGps,
+                        onRequestLocationPermission = {
+                            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        },
+                        onBack = {
+                            navController.navigate(AdsbDestination.LIVE.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
                     )
                 }
                 // A sub-screen of Settings, deliberately not an AdsbDestination entry —
@@ -234,6 +282,13 @@ private fun AdsbScaffold(
                     OfflineMapsScreen(
                         observerLat = config.observerLatitude,
                         observerLon = config.observerLongitude,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(ROUTE_STATS) {
+                    val visits by viewModel.visits.collectAsStateWithLifecycle()
+                    StatsScreen(
+                        visits = visits,
                         onBack = { navController.popBackStack() },
                     )
                 }

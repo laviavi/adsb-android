@@ -58,6 +58,52 @@ class CrcParityTests {
             assertEquals(CrcChecker.CrcResult.INVALID, r.crcResult)
         }
 
+        @Test fun `two-bit error in data bits is corrected when correctTwoBit is on`() {
+            val bytes = hex(DF17_VALID)
+            bytes[4] = bytes[4] xor 0x08          // flip one data bit
+            bytes[7] = bytes[7] xor 0x02          // flip a second, unrelated data bit
+            val r = CrcChecker.check(RawFrame(bytes), correctSingleBit = false, correctTwoBit = true)
+            assertEquals(CrcChecker.CrcResult.CORRECTED, r.crcResult)
+            assertArrayEquals(hex(DF17_VALID), r.frame.bytes, "Correction must restore the original frame")
+        }
+
+        @Test fun `two-bit correction is off by default`() {
+            val bytes = hex(DF17_VALID)
+            bytes[4] = bytes[4] xor 0x08
+            bytes[7] = bytes[7] xor 0x02
+            val r = CrcChecker.check(RawFrame(bytes)) // correctSingleBit defaults true, correctTwoBit defaults false
+            assertEquals(CrcChecker.CrcResult.INVALID, r.crcResult)
+        }
+
+        @Test fun `two-bit correction is independent of the single-bit toggle`() {
+            // Disabling single-bit must not disable two-bit, and vice versa.
+            val bytes = hex(DF17_VALID)
+            bytes[4] = bytes[4] xor 0x08
+            val r = CrcChecker.check(RawFrame(bytes), correctSingleBit = false, correctTwoBit = true)
+            assertEquals(
+                CrcChecker.CrcResult.INVALID, r.crcResult,
+                "A single-bit error is outside what correctTwoBits searches for",
+            )
+        }
+
+        @Test fun `two flipped CRC bits are not silently corrected`() {
+            // Two-bit correction only searches the 88 data bits, same as single-bit.
+            val bytes = hex(DF17_VALID)
+            bytes[13] = bytes[13] xor 0x03        // two bits in the trailing CRC byte
+            val r = CrcChecker.check(RawFrame(bytes), correctSingleBit = false, correctTwoBit = true)
+            assertEquals(CrcChecker.CrcResult.INVALID, r.crcResult)
+        }
+
+        @Test fun `signal level survives two-bit correction`() {
+            val bytes = hex(DF17_VALID)
+            bytes[4] = bytes[4] xor 0x08
+            bytes[7] = bytes[7] xor 0x02
+            val withSignal = RawFrame(bytes, signalLevel = 0.55)
+            val r = CrcChecker.check(withSignal, correctSingleBit = false, correctTwoBit = true)
+            assertEquals(CrcChecker.CrcResult.CORRECTED, r.crcResult)
+            assertEquals(0.55, r.frame.signalLevel, 0.0001)
+        }
+
         @Test fun `a flipped CRC bit is not silently corrected`() {
             // Python only flips the 88 data bits; "fixing" a parity bit would
             // accept a frame whose payload is still wrong.

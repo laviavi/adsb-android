@@ -3,14 +3,18 @@
 Living document. Rewritten whenever work lands, so it always describes the code as
 it is now â€” not a dated audit with corrections bolted on.
 
-**Last updated:** 2026-07-30 â€” offline map download toggle + OSM default URL. Phase 1â€“4 UI models,
-shared atoms, navigation, Live screen, AircraftRow, AircraftDetailSheet, LogsScreen,
-ReceiverScreen (viewModel wrapper), SettingsScreen (viewModel wrapper), MapScreen
-(placeholder with marker count) all compiling. PipelineService now exposes public
-`startPipeline()`, `stopPipeline()`, `reconnect()`. TextListScreen deleted (replaced
-by LiveScreen + 5-tab NavigationSuiteScaffold). Version **v1.0.0** (`versionCode` 10).
+**Last updated:** 2026-08-03 â€” Live row split into a top strip (identity + data
+block) plus full-width airline/route and type lines (5 lines total); new Aircraft
+Stats screen (Settings â†’ "View aircraft stats") logging every departure to an
+append-only `aircraft_visits` table, grouped by airline vs private aircraft. Phase
+1â€“4 UI models, shared atoms, navigation, Live screen, AircraftRow, AircraftDetailSheet,
+LogsScreen, ReceiverScreen (viewModel wrapper), SettingsScreen (viewModel wrapper),
+MapScreen (placeholder with marker count) all compiling. PipelineService now exposes
+public `startPipeline()`, `stopPipeline()`, `reconnect()`. TextListScreen deleted
+(replaced by LiveScreen + 5-tab NavigationSuiteScaffold). Version **v1.5.0**
+(`versionCode` 14).
 **Method:** read the source tree and tests; verified by reading files, not recall.
-**Current:** 310 `:core:receiver` + 32 `:app` tests pass. Debug APK builds.
+**Current:** 396 `:core:receiver` + 64 `:app` tests pass. Debug APK builds.
 
 **Parity against the Python reference (`D:\SDR\adsb_v9_5`):**
 
@@ -270,6 +274,14 @@ Each is enumerated in a test and fails loudly if it widens.
 | Bias tee unverified on real hardware | Low | command encoding unit-tested; never sent to a live dongle â€” no LNA on hand to confirm rtl_tcp_andro+ honours `0x0e` |
 | 9 of 29 `docs/correction_plan.md` findings still open | Lowâ€“Mixed | 20 fixed (Â§12+Â§13). Remaining: #20-22 (counter/rate semantics), #23-29 (Android-only behaviours). No missing Python-parity fields remain. |
 | `:core:model` not yet extracted | Low | no second consumer of model-only types exists yet (`:core:ui`/`:data` are Phase 4/5) |
+| Map never showed the live GPS fix in Follow-GPS mode | **FIXED** 2026-08-01 | `PipelineService` resolved the live fix internally (`ObserverPositionResolver`, feeding the decoder/`AircraftManager`) but never published it upward — `MapScreen`'s center/"Follow observer" button read `AppConfig.observerLatitude/observerLongitude` directly, which in Follow-GPS mode are only the fallback coordinates, so the map stayed pinned to the fallback both on app start and on tap. Added `PipelineService.resolvedObserverPosition` (`StateFlow<Pair<Double,Double>>`, updated in `applyObserverPosition()`), threaded through `MainActivity` → `MainViewModel.observerPosition` → `MapScreen`'s `observer` `GeoPoint`. Not yet confirmed on device — no Follow-GPS hardware pass since |
+| Settings → "Manage offline maps" closed the app | **FIXED** 2026-08-01 | Root cause found via `adb logcat -b crash`: `AndroidNetworkEligibility.currentState()` calls `ConnectivityManager.getActiveNetwork()`, which throws `SecurityException` without `android.permission.ACCESS_NETWORK_STATE` — never declared in the manifest. Thrown from `OfflineMapsViewModel.init { refresh() }`, i.e. the instant the screen opens. Added the permission to `AndroidManifest.xml`; confirmed on device (Samsung SM_S928B) — screen now opens cleanly. Along the way, also fixed a real hazard in the same function: `refresh()` ran the manifest load and `storageUsage()` (a `File.length()` stat per stored tile key) synchronously on the caller's thread; now dispatches on `Dispatchers.IO`. New Robolectric test `OfflineMapsScreenSmokeTest` (real `FileManifestStore`/`FileTileStore`/`OfflineMapManager` adapters, no mocks) covers empty-state, the download sheet, and select → delete → confirm with a real segment |
+| Live screen "Install" button (driver-not-installed state) was a no-op | **FIXED** 2026-08-01 | `onClick = {}` — found during a full UI-control audit. `DriverNotInstalledPrompt` already had working Play-Store-intent logic for the same purpose; extracted to `UsbHotplugReceiver.openDriverInstallPage()` and both call sites now use it |
+| Live screen "View logs" button (receiver-error state) navigated to Receiver, not Logs | **FIXED** 2026-08-01 | Wired to `onNavigateToReceiver`, same as the identical action in the Running state. Relabeled to "Open Receiver" to match what it actually does, rather than rewiring navigation and guessing at intent |
+| Live screen overflow → "Reset counters" was a no-op | **FIXED** 2026-08-01 | `onClick = { showOverflowMenu = false }` only closed the menu. `PipelineStats.reset()` already existed and is used internally on reconnect (`clearSessionState()`); added `PipelineService.resetStatsCounters()` and wired the menu item to call it |
+| Settings screen "Close" (✕) and "Done" buttons were both no-ops | **FIXED** 2026-08-01 | The public `SettingsScreen()` composable never declared an `onBack` parameter, so the private content composable's `onBack: () -> Unit = {}` always used its empty default — tapping either control did nothing, on the exact two actions ("Close", "Done") the audit was asked to verify. Added the parameter, wired at the `MainActivity` call site to navigate back to the Live tab using the same `popUpTo`/`launchSingleTop`/`restoreState` pattern already used for every other bottom-nav move in that file |
+| History screen "Clear" has no confirmation | **Flagged, not changed** 2026-08-01 | Irreversibly deletes all Room-backed aircraft history on a single tap, unlike the Offline Maps delete flow (`DeleteConfirmDialog`) or Receiver's STOP-while-running (`AlertDialog`), which both confirm. Left as-is pending a product decision — could be intentional given the list regenerates from live traffic |
+| `AircraftDetailScreen.kt` (356 lines) is dead code | **Flagged, not changed** 2026-08-01 | Defined but never called from production code — superseded by `AircraftDetailSheet` (the bottom sheet), per `MapScreen.kt`'s own comment: "there is one detail implementation, not a second one living on the map." Only other reference is a historical note in `PHASE_PROGRESS.md`. Left in place pending confirmation it's safe to delete |
 
 ---
 
@@ -1219,15 +1231,22 @@ downloaded region.
 `android.util.Log`, which would force Robolectric on a class whose entire job is file
 I/O that works fine on a plain JVM. Found by a failing test, not by review.
 
-### Not wired: the tile provider
+### Tile provider: now defaults to OSM (2026-08-01 update)
 
-`AppModule` binds `LocalOnlyTileDownloader`, so downloads currently store nothing.
-This is deliberate. The map renders from `tile.openstreetmap.org`, whose usage policy
-explicitly prohibits this feature's shape — it names "pre-seeding large areas or
-multiple zoom levels" and "Download region for offline use" as blockable, and states
-offline use is not permitted on their servers. `OsmTileDownloader` requires an
-explicit URL template and user agent with no defaults, so enabling downloads is a
-conscious licensing decision. Options and sizing are in `docs/OFFLINE_MAPS.md`.
+`AppModule` binds `ConfigurableTileDownloader`, reading `AppConfig.offlineTileUrlTemplate`
+per fetch. The map renders from `tile.openstreetmap.org`, whose usage policy explicitly
+prohibits this feature's shape — it names "pre-seeding large areas or multiple zoom
+levels" and "Download region for offline use" as blockable, and states offline use is
+not permitted on their servers.
+
+Originally this template had **no default** for exactly that reason (see the v1.0
+design note this replaces, below) — enabling downloads was meant to require a
+conscious, typed-in choice. As of the "OSM default tile source" change,
+`AppConfig.offlineTileUrlTemplate` defaults to `tile.openstreetmap.org`'s own URL, so
+flipping Settings → "Enable offline map downloads" alone is enough to start bulk
+downloads against it. Raised during the 2026-08-01 UI audit; kept as-is by explicit
+decision — the ToS risk is accepted, not accidental. Options and sizing are in
+`docs/OFFLINE_MAPS.md`.
 
 ### Made usable: cache import (2026-07-29, same session)
 
@@ -1271,3 +1290,147 @@ plus 8 file-storage integration tests.
   the device. Usage is shown; enforcement would mean automatic deletion.
 - **Not exercised on-device.** ADB was unreachable at deploy time across several
   attempts; the whole offline feature is unverified on hardware.
+
+## 24. CRC two-bit correction + StatusStrip status-bar overlap fix (2026-08-02, v1.2.0)
+
+**CRC two-bit error correction added to `CrcChecker`.** After single-bit correction
+fails, DF17/18 frames now also try flipping every pair of the 88 data bits
+(`correctTwoBits`/`buildTwoBitSyndromes`, C(88,2) = 3,828 candidate pairs) and accept
+the fix only if the resulting syndrome maps to exactly one pair — ambiguous syndromes
+are rejected rather than guessed, same policy as the existing single-bit path.
+
+**Deliberate divergence from the Python reference.** `checker.py` implements only
+single-bit correction; two-bit is new. False-accept risk is higher than single-bit's
+(documented in the class doc comment) — roughly 3,828 candidate pairs vs. 88 single-bit
+positions, so a coincidental accept is ~44x likelier per corrupted frame. Covered by
+4 new tests in `CrcParityTests` (two-bit correction, disabled via `correctSingleBit`,
+CRC-bit immunity, signal-level survival through `.copy()`).
+
+**StatusStrip (uptime/msg-rate/CRC%) was rendering under the phone's system status bar
+icons**, overlapping the clock/battery/signal glyphs. The app has no edge-to-edge
+inset handling anywhere (`MainActivity.kt` never called `enableEdgeToEdge()` or
+consumed `WindowInsets`), so once the OS started drawing the app edge-to-edge the top
+`Column` in `AdsbScaffold` (StatusStrip + NavHost) had nothing pushing it below the
+status bar. Fixed with `Modifier.statusBarsPadding()` on that Column — a no-op if the
+window is ever non-edge-to-edge, so it's safe regardless of OS/theme behavior. No
+other UI changed.
+
+**Version bumped v1.1.0 → v1.2.0** (`versionCode` 10 → 11) for this change.
+
+**Two-bit correction is independently switchable.** `AppConfig.crcCorrectTwoBit`
+(default `false`, persisted via `AppConfigStore`) gates it separately from
+`crcCorrectSingleBit` — either, both, or neither can be on, so single-bit can be
+turned off entirely while two-bit runs alone, or vice versa. Settings → Data has a
+second switch below "Single-bit CRC correction". Both flags are read live per frame
+in `PipelineService`, same as the existing single-bit switch — no pipeline restart.
+Added so the two can be A/B compared over time before settling on a default.
+
+Full suite: `./gradlew.bat :core:receiver:test :app:testDebugUnitTest :app:assembleDebug`
+— 396 core + 57 app tests, 0 failures; debug APK builds. Not run on-device (see rule
+in [CLAUDE.md](../CLAUDE.md) memory: UI changes are verified by Avi on the physical
+phone, not by screenshot/simulated-tap tooling here).
+
+## 25. Live row redesign (4 lines) + History CSV export/share (2026-08-02, v1.3.0)
+
+**`AircraftRow` restructured from 3 lines to 4**, by decision after reviewing mockups:
+- Line 1: ICAO + [RA badge] (previously also carried callsign/type)
+- Line 2: callsign + tail number (registration) — new grouping
+- Line 3: type code + airline (operator) + route — type code moved down from line 1
+- Line 4: signal bars · msgs · speed · age — unchanged from the old line 3
+
+Right-hand DIST/ALT/TRACK columns untouched, per explicit instruction. Row height
+grows beyond the 72 dp floor (already documented as a floor, not a cap) — fewer
+aircraft fit on screen without scrolling, a known and accepted trade-off.
+
+**Line 2 can be genuinely empty** (no callsign and no registration), unlike line 3
+which always has a "route not found" fallback. Fixed with an invisible placeholder
+`Text(" ", ..., color = Color.Transparent)` in the callsign's own style, so that
+line reserves its height instead of collapsing and making the row shorter than its
+neighbours in the list.
+
+**Test regression found and fixed, not in production code.** `AircraftRowLayoutTests`
+started failing after the redesign — three stacked 4-line rows are tall enough that
+Robolectric's compose-test root (a bounded virtual screen height) clamps the last
+row's last line instead of growing to fit, coercing its measured height down. The
+real `LiveScreen` never hits this because it's a `LazyColumn`, which doesn't
+height-constrain off-screen content the same way. Fixed by wrapping the test's
+`Column` in `verticalScroll(rememberScrollState())` so it measures at natural height
+regardless of the harness's viewport — matches how the production list behaves.
+Confirmed via a throwaway diagnostic test (added, used to isolate the failing line,
+then deleted) rather than guessing from source reading alone.
+
+**History → CSV export + share.** `CsvExporter.exportAircraftSeen()` writes the full
+`aircraft_seen` table (icao, callsign, registration, aircraft_type, operator, route,
+altitude, ground speed, track, lat/lon, distance, squawk, message count, first/last
+seen) to a CSV under `getExternalFilesDir`. Timestamps are `MM/dd/yyyy HH:mm` — no
+seconds, per explicit instruction. `PipelineService.exportHistoryCsv()` runs it on
+`Dispatchers.IO`; a new "Share" button next to "Clear" on the History screen triggers
+it and opens the system share sheet via a `FileProvider` (`res/xml/file_paths.xml`,
+manifest `<provider>` entry — new, this app had none before). CSV fields are quoted
+only when they contain a comma/quote/newline, to keep normal fields readable.
+
+Full suite: 396 core + 57 app tests, 0 failures; debug APK builds. Deployed to the
+Samsung SM-S928B test device. Not visually verified here — Avi checks the Live
+screen and History → Share on-device (per the no-screenshot-debugging memory).
+
+## 26. Live row split into top strip + full-width lines (2026-08-03, v1.4.0)
+
+After reviewing §25's 4-line row on-device, the type code turned out to be a
+verbose full name (`Boeing 737 MAX 9`, not `B738`), crowding line 3 and starving
+the route down to 2-3 truncated characters. Fixed by reordering and widening,
+confirmed against a mockup with realistic long names before coding:
+
+- Line 1: ICAO + [RA badge], line 2: callsign + tail number — unchanged, still
+  share the row with the DIST/ALT/TRACK data block exactly as before.
+- Line 3 (airline + route) and line 4 (type code) moved **out of that shared row**
+  into their own full-width rows below it — the data block is only two lines tall,
+  so nothing sits to their right once you're past it; they now run edge to edge
+  instead of stopping where DIST starts.
+- Line 5 (signal/msgs/speed/age) stays at the old narrower width — reserved via
+  `Modifier.padding(end = DataBlockWidth + RowGutter)` rather than sharing a Row
+  with the data block like lines 1-2 do.
+- `AircraftRow`'s outer container changed from a `Row` to a `Column` to host this
+  split; `AircraftRowLayoutTests`'s "gutter"/height checks still pass unchanged
+  since `IDENTITY` now tags only the top-strip's lines-1-2 Column, which is exactly
+  what those checks are about.
+
+## 27. Aircraft Stats screen — log book of every tail/ICAO ever seen (2026-08-03, v1.5.0)
+
+New, independent of History. `aircraft_seen` (History's table) replaces its row on
+every re-sighting and is wiped by History's Clear — neither survives what this
+needed: a permanent "how many times have I seen this aircraft" count.
+
+**`aircraft_visits`** (new table, `MIGRATION_5_6`, DB v5→v6): one `@Insert` row per
+departure, written alongside the existing `aircraft_seen` upsert in
+`PipelineService.recordDeparted()`. Never replaced, never touched by Clear.
+
+**Airline vs private, decided by Avi:** `isAirline = (operatorSource == DataSource.ALGORITHMIC)`
+— true only when the operator name came from `Airlines.fromCallsign` (the offline
+callsign-prefix table, set in exactly one place, `OfflineEnrichment.enrich`).
+Everything else — hexdb.io owner names, FlightAware-scraped airline names alike —
+counts as private. This was an explicit tradeoff Avi chose over a rule that would
+also require a new field: some legitimately-commercial flights whose airline name
+only resolved via network scrape land in the "private" tab. No new field was needed
+because `AircraftState.operatorSource` already carried exactly this signal.
+
+**Aggregation is plain Kotlin, not SQL** — `ui/stats/AircraftStats.kt`'s
+`summarizeVisits()` groups the full visit list by ICAO (identity fields taken from
+each aircraft's most recent visit, counts/min/max computed across all of them),
+mirroring `HistoryScreen.kt`'s own in-memory filter/sort/group pattern rather than
+writing `GROUP BY` queries. Pure function, unit-tested with plain JUnit
+(`AircraftStatsTests.kt`), no Robolectric needed.
+
+**`ui/stats/StatsScreen.kt`** — reached via Settings → "Aircraft stats" (mirrors the
+existing "Manage offline maps" section/route pattern exactly, not a 6th bottom-nav
+tab, per Avi's choice). Two tabs, "By airline" (grouped, sticky header per airline
+showing aircraft count + total sightings) and "Private aircraft" (flat, sorted by
+times-seen). Tapping a row opens a `ModalBottomSheet` listing every visit's date
+(`MM/dd/yyyy HH:mm`, matching the CSV-export format from §25) and duration (reuses
+`HistoryScreen.kt`'s `formatDuration` — `internal`, so module-visible, no duplicate).
+
+Full suite: 396 core + 64 app tests (7 new: 6 `AircraftStatsTests` + 1 migration
+test), 0 failures; debug APK builds. Deployed to the Samsung SM-S928B. Migration
+confirmed against a real SQLite engine in `AppDatabaseMigrationTests` (existing
+`aircraft_seen` rows survive v5→v6 untouched, new `aircraft_visits` table is
+immediately usable) — not yet confirmed against the actual on-device database file,
+which has accumulated real migrations v1 through v5 already.

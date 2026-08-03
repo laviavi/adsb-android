@@ -25,6 +25,7 @@ class AppConfigStore(private val context: Context) {
         val gapDivisor      = intPreferencesKey("preamble_gap_divisor")
         val deltaFloor      = intPreferencesKey("delta_floor")
         val crcCorrect      = booleanPreferencesKey("crc_correct_single_bit")
+        val crcCorrectTwoBit = booleanPreferencesKey("crc_correct_two_bit")
         val expirySeconds   = intPreferencesKey("aircraft_expiry_seconds")
         val enrichment      = booleanPreferencesKey("enrichment_enabled")
         val rawLogging      = booleanPreferencesKey("raw_logging_enabled")
@@ -44,6 +45,7 @@ class AppConfigStore(private val context: Context) {
         val mapLabels            = booleanPreferencesKey("map_show_labels")
         val mapGroundTraffic     = booleanPreferencesKey("map_show_ground_traffic")
         val mapTrailLength       = intPreferencesKey("map_trail_length")
+        val mapRingRadii         = stringPreferencesKey("map_ring_radii_mi")
     }
 
     suspend fun load(): AppConfig {
@@ -57,6 +59,7 @@ class AppConfigStore(private val context: Context) {
             preambleGapDivisor = prefs[Keys.gapDivisor] ?: defaults.preambleGapDivisor,
             deltaFloor         = prefs[Keys.deltaFloor] ?: defaults.deltaFloor,
             crcCorrectSingleBit   = prefs[Keys.crcCorrect] ?: defaults.crcCorrectSingleBit,
+            crcCorrectTwoBit      = prefs[Keys.crcCorrectTwoBit] ?: defaults.crcCorrectTwoBit,
             aircraftExpirySeconds = prefs[Keys.expirySeconds] ?: defaults.aircraftExpirySeconds,
             enrichmentEnabled     = prefs[Keys.enrichment] ?: defaults.enrichmentEnabled,
             offlineMode           = prefs[Keys.offlineMode] ?: defaults.offlineMode,
@@ -80,6 +83,9 @@ class AppConfigStore(private val context: Context) {
             mapShowLabels        = prefs[Keys.mapLabels] ?: defaults.mapShowLabels,
             mapShowGroundTraffic = prefs[Keys.mapGroundTraffic] ?: defaults.mapShowGroundTraffic,
             mapTrailLength       = prefs[Keys.mapTrailLength] ?: defaults.mapTrailLength,
+            mapRingRadiiMi = prefs[Keys.mapRingRadii]
+                ?.let { s -> if (s.isBlank()) emptyList() else s.split(",").mapNotNull { it.trim().toIntOrNull() } }
+                ?: defaults.mapRingRadiiMi,
         )
     }
 
@@ -92,6 +98,7 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.gapDivisor]    = config.preambleGapDivisor
             prefs[Keys.deltaFloor]    = config.deltaFloor
             prefs[Keys.crcCorrect]    = config.crcCorrectSingleBit
+            prefs[Keys.crcCorrectTwoBit] = config.crcCorrectTwoBit
             prefs[Keys.expirySeconds] = config.aircraftExpirySeconds
             prefs[Keys.enrichment]    = config.enrichmentEnabled
             prefs[Keys.offlineMode]   = config.offlineMode
@@ -111,6 +118,7 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.mapLabels]          = config.mapShowLabels
             prefs[Keys.mapGroundTraffic]   = config.mapShowGroundTraffic
             prefs[Keys.mapTrailLength]     = config.mapTrailLength
+            prefs[Keys.mapRingRadii]       = config.mapRingRadiiMi.joinToString(",")
         }
     }
 }

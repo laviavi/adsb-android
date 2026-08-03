@@ -58,12 +58,17 @@ fun SettingsScreen(
     onConfigChange: (AppConfig) -> Unit,
     modifier: Modifier = Modifier,
     onOpenOfflineMaps: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
+    onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
+    onRequestLocationPermission: () -> Unit = {},
+    onBack: () -> Unit = {},
 ) {
     val config by viewModel.config.collectAsStateWithLifecycle()
     val gainOptions by viewModel.gainOptions.collectAsStateWithLifecycle()
     SettingsScreenContent(
         config, driverInstalled, gainOptions, onConfigChange,
-        onOpenOfflineMaps = onOpenOfflineMaps, modifier = modifier,
+        onOpenOfflineMaps = onOpenOfflineMaps, onOpenStats = onOpenStats, onUpdateGps = onUpdateGps,
+        onRequestLocationPermission = onRequestLocationPermission, onBack = onBack, modifier = modifier,
     )
 }
 
@@ -77,6 +82,8 @@ private fun SettingsScreenContent(
     onRequestLocationPermission: () -> Unit = {},
     onBack: () -> Unit = {},
     onOpenOfflineMaps: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
+    onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
     modifier: Modifier = Modifier,
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.ROOT) }
@@ -139,10 +146,12 @@ private fun SettingsScreenContent(
                 SettingsPage.ROOT -> {
                     ReceiverSection(config, driverInstalled, gainOptions, { page = SettingsPage.TUNER }, onConfigChange)
                     SortSection(config, onConfigChange)
-                    ObserverSection(config, onConfigChange, onRequestLocationPermission)
+                    ObserverSection(config, onConfigChange, onRequestLocationPermission, onUpdateGps)
+                    MapRingsSection(config, onConfigChange)
                     PowerSection(config, onConfigChange)
                     OfflineMapsSection(onOpenOfflineMaps)
                     OfflineTileSourceSection(config, onConfigChange)
+                    StatsSection(onOpenStats)
                     DataSection(config, onConfigChange)
                 }
                 SettingsPage.TUNER -> TunerPage(config, gainOptions, onConfigChange)
@@ -379,7 +388,13 @@ private fun ObserverSection(
     config: AppConfig,
     onChange: (AppConfig) -> Unit,
     onRequestLocationPermission: () -> Unit,
+    onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
 ) {
+    val context = LocalContext.current
+    val locationGranted = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.ACCESS_FINE_LOCATION,
+    ) == PackageManager.PERMISSION_GRANTED
+
     SettingsSection("Observer position", "Used for range, bearing and CPR position decoding.") {
         OptionRow(
             label = "Fixed location",
@@ -398,11 +413,7 @@ private fun ObserverSection(
         )
 
         if (config.observerMode == ObserverMode.FOLLOW_GPS) {
-            val context = LocalContext.current
-            val granted = ContextCompat.checkSelfPermission(
-                context, Manifest.permission.ACCESS_FINE_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
+            if (!locationGranted) {
                 InfoBanner(
                     "Location permission not granted. Position stays on the fixed coordinates below.",
                     BannerTone.WARNING,
@@ -436,6 +447,82 @@ private fun ObserverSection(
         SettingsField(config.observerLongitude.toString(), "Longitude") {
             it.toDoubleOrNull()?.let { v -> onChange(config.copy(observerLongitude = v)) }
         }
+
+        Spacer(Modifier.height(4.dp))
+        var updatingGps by remember { mutableStateOf(false) }
+        var lastGpsResult by remember { mutableStateOf<Boolean?>(null) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                enabled = !updatingGps,
+                onClick = {
+                    if (!locationGranted) {
+                        onRequestLocationPermission()
+                        return@OutlinedButton
+                    }
+                    updatingGps = true
+                    lastGpsResult = null
+                    onUpdateGps { ok -> updatingGps = false; lastGpsResult = ok }
+                },
+            ) { Text(if (updatingGps) "Updating…" else "Update GPS") }
+            when {
+                updatingGps -> Unit
+                !locationGranted -> {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Tap to grant location permission",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AdsbColors.Warning,
+                    )
+                }
+                lastGpsResult != null -> {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (lastGpsResult == true) "Updated" else "No fix — check GPS signal",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (lastGpsResult == true) AdsbColors.Success else AdsbColors.Warning,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Range rings drawn around the observer on the map. Free-form list rather than a
+ * fixed enum (like [com.laviavi.adsbandroid.ui.map.RangeStep]) because the whole
+ * point is letting the operator pick their own distances — up to
+ * [AppConfig.MAX_MAP_RINGS], each up to [AppConfig.MAX_MAP_RING_MI] mi.
+ */
+@Composable
+private fun MapRingsSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
+    SettingsSection(
+        "Map range rings",
+        "Concentric rings drawn around your position on the map.",
+    ) {
+        config.mapRingRadiiMi.forEachIndexed { index, mi ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsField(
+                    value = mi.toString(),
+                    label = "Ring ${index + 1} (mi)",
+                    modifier = Modifier.weight(1f),
+                ) { text ->
+                    text.toIntOrNull()?.coerceIn(1, AppConfig.MAX_MAP_RING_MI)?.let { v ->
+                        onChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi.toMutableList().apply { set(index, v) }))
+                    }
+                }
+                IconButton(onClick = {
+                    onChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi.toMutableList().apply { removeAt(index) }))
+                }) {
+                    Icon(Icons.Default.Close, contentDescription = "Remove ring ${index + 1}", tint = AdsbColors.TextSecondary)
+                }
+            }
+        }
+        if (config.mapRingRadiiMi.size < AppConfig.MAX_MAP_RINGS) {
+            TextButton(onClick = {
+                val next = ((config.mapRingRadiiMi.maxOrNull() ?: 0) + 10).coerceIn(1, AppConfig.MAX_MAP_RING_MI)
+                onChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi + next))
+            }) { Text("+ Add ring", color = AdsbColors.Primary) }
+        }
     }
 }
 
@@ -466,6 +553,29 @@ private fun OfflineMapsSection(onOpen: () -> Unit) {
         ) {
             Text(
                 "Manage offline maps",
+                style = MaterialTheme.typography.bodyMedium,
+                color = AdsbColors.TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            Text("›", style = MaterialTheme.typography.titleMedium, color = AdsbColors.TextSecondary)
+        }
+    }
+}
+
+@Composable
+private fun StatsSection(onOpen: () -> Unit) {
+    SettingsSection("Aircraft stats", "How many times you've seen each tail or ICAO, by airline.") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, AdsbColors.Outline, RoundedCornerShape(8.dp))
+                .clickable(onClick = onOpen)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "View aircraft stats",
                 style = MaterialTheme.typography.bodyMedium,
                 color = AdsbColors.TextPrimary,
                 modifier = Modifier.weight(1f),
@@ -524,6 +634,13 @@ private fun DataSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
             description = "Repairs one-bit errors in DF17/18 frames.",
             checked = config.crcCorrectSingleBit,
             onCheckedChange = { onChange(config.copy(crcCorrectSingleBit = it)) },
+        )
+        SwitchRow(
+            label = "Two-bit CRC correction",
+            description = "Also repairs two-bit errors. Independent of single-bit; " +
+                "higher chance of accepting a wrongly \"corrected\" frame.",
+            checked = config.crcCorrectTwoBit,
+            onCheckedChange = { onChange(config.copy(crcCorrectTwoBit = it)) },
         )
         SwitchRow(
             label = "Raw message log",

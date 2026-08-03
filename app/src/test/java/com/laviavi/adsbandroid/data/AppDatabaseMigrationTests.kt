@@ -76,7 +76,7 @@ class AppDatabaseMigrationTests {
         // AppDatabase's actual entities — a wrong migration throws here rather
         // than silently succeeding.
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
         runBlocking {
@@ -115,7 +115,7 @@ class AppDatabaseMigrationTests {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
         val seen = runBlocking { migrated.aircraftSeenDao().observeAll().first() }
@@ -124,6 +124,44 @@ class AppDatabaseMigrationTests {
             "corrupted pre-fix data must not survive as a plausible-looking string",
             seen.single().squawk,
         )
+        migrated.close()
+    }
+
+    @Test fun `v5 to v6 adds a working aircraft_visits table without touching aircraft_seen`() {
+        // Build a real v1 db, then run every migration up to v5 by hand to land
+        // on the exact pre-v6 shape, mirroring how the v2-to-v3 test above builds
+        // its starting point.
+        val legacy = Room.databaseBuilder(context, LegacyV1Database::class.java, dbName).build()
+        val raw = legacy.openHelper.writableDatabase
+        MIGRATION_1_2.migrate(raw)
+        MIGRATION_2_3.migrate(raw)
+        MIGRATION_3_4.migrate(raw)
+        MIGRATION_4_5.migrate(raw)
+        raw.execSQL(
+            "INSERT INTO aircraft_seen (icao, messageCount, firstSeenMs, lastSeenMs) " +
+                "VALUES ('AAAAAA', 1, 0, 0)",
+        )
+        legacy.close()
+
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .build()
+
+        runBlocking {
+            // Pre-existing aircraft_seen row survives — v6 only adds a table, touches nothing else.
+            assertEquals(1, migrated.aircraftSeenDao().count())
+
+            migrated.aircraftVisitDao().insert(
+                AircraftVisitEntity(
+                    icao = "AAAAAA", registration = "N123AB", operator = "Test Air",
+                    aircraftType = "B738", isAirline = true,
+                    firstSeenMs = 1_000L, lastSeenMs = 2_000L, messageCount = 50,
+                ),
+            )
+            val visits = migrated.aircraftVisitDao().observeAll().first()
+            assertEquals(1, visits.size)
+            assertEquals("N123AB", visits.single().registration)
+        }
         migrated.close()
     }
 }

@@ -160,12 +160,9 @@ class AircraftOverlay(
         ringRadiiNm.forEachIndexed { i, radiusNm ->
             val radiusPx = nauticalMilesToPixels(radiusNm, obs.latitude, mapView)
             if (radiusPx <= 0f) return@forEachIndexed
-            // Outer rings fade: .22 / .16 / .10 alpha, innermost strongest.
-            val alpha = when (i) {
-                0 -> 0.22f
-                1 -> 0.16f
-                else -> 0.10f
-            }
+            // Outer rings fade, innermost strongest — scales to however many rings
+            // are configured (up to AppConfig.MAX_MAP_RINGS) rather than a fixed count.
+            val alpha = (0.22f - i * 0.03f).coerceAtLeast(0.08f)
             ringPaint.color = AdsbColors.Primary.toArgb()
             ringPaint.alpha = (alpha * 255).roundToInt()
             canvas.drawCircle(cx, cy, radiusPx, ringPaint)

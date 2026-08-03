@@ -39,6 +39,7 @@ enum class HistoryGroupBy(val label: String) {
 fun HistoryScreen(
     entries: List<AircraftSeenEntity>,
     onClear: () -> Unit,
+    onShare: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var filter by remember { mutableStateOf("") }
@@ -89,6 +90,7 @@ fun HistoryScreen(
                 modifier = Modifier.weight(1f),
             )
             if (entries.isNotEmpty()) {
+                TextButton(onClick = onShare) { Text("Share", color = AdsbColors.Primary) }
                 TextButton(onClick = onClear) { Text("Clear", color = AdsbColors.Primary) }
             }
         }

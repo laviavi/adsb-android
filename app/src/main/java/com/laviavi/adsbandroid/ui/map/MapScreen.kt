@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
@@ -73,6 +74,7 @@ fun MapScreen(
     val density = LocalDensity.current.density
     val markers by viewModel.mapMarkers.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
+    val observerPosition by viewModel.observerPosition.collectAsStateWithLifecycle()
 
     val configuration = LocalConfiguration.current
     val minDimPx = minOf(configuration.screenWidthDp, configuration.screenHeightDp) * density.toDouble()
@@ -83,8 +85,8 @@ fun MapScreen(
     var selectedIcao by rememberSaveable { mutableStateOf<String?>(null) }
     var shownOfTotal by remember { mutableStateOf(0 to 0) }
 
-    val observer = remember(config.observerLatitude, config.observerLongitude) {
-        GeoPoint(config.observerLatitude, config.observerLongitude)
+    val observer = remember(observerPosition) {
+        GeoPoint(observerPosition.first, observerPosition.second)
     }
     val selected = remember(markers, selectedIcao) {
         selectedIcao?.let { id -> markers.find { it.icao == id } }
@@ -171,11 +173,9 @@ fun MapScreen(
         overlay.showRangeRings = config.mapShowRangeRings
         overlay.showLabels = config.mapShowLabels
         overlay.showGroundTraffic = config.mapShowGroundTraffic
-        overlay.ringRadiiNm = listOf(rangeStep.innerNm, rangeStep.outerNm)
-        overlay.ringLabels = listOf(
-            config.distanceUnit.formatWhole(rangeStep.innerNm),
-            config.distanceUnit.formatWhole(rangeStep.outerNm),
-        )
+        val ringsNm = config.mapRingRadiiMi.sorted().map { DistanceUnit.MILES.toNm(it.toDouble()) }
+        overlay.ringRadiiNm = ringsNm
+        overlay.ringLabels = ringsNm.map { config.distanceUnit.formatWhole(it) }
         overlay.onDecimated = { shown, total -> shownOfTotal = shown to total }
         mapView.invalidate()
     }
@@ -206,7 +206,17 @@ fun MapScreen(
             layersActive = layersOpen,
             canZoomIn = rangeStep.ordinal > 0,
             canZoomOut = rangeStep.ordinal < RangeStep.entries.lastIndex,
-            onFollow = { followObserver = true; mapView.controller.animateTo(observer) },
+            onFollow = {
+                followObserver = true
+                mapView.controller.animateTo(observer)
+                // "Show my location" zooms to fit the largest configured ring, not
+                // whatever the +/- stepper happens to be on — the rings can go out
+                // to 250 mi, well past the stepper's fixed range steps.
+                config.mapRingRadiiMi.maxOrNull()?.let { largestMi ->
+                    val nm = DistanceUnit.MILES.toNm(largestMi.toDouble())
+                    mapView.controller.zoomTo(computeZoom(nm, minDimPx, observer.latitude), 300L)
+                }
+            },
             onLayers = { layersOpen = !layersOpen },
             onZoomIn = { if (rangeStep.ordinal > 0) rangeStep = RangeStep.entries[rangeStep.ordinal - 1] },
             onZoomOut = {
@@ -223,6 +233,7 @@ fun MapScreen(
                 config = config,
                 rangeLabel = config.distanceUnit.formatWhole(rangeStep.innerNm),
                 onConfigChange = onConfigChange,
+                onClose = { layersOpen = false },
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 68.dp, bottom = 96.dp),
@@ -398,6 +409,7 @@ private fun LayersPanel(
     config: AppConfig,
     rangeLabel: String,
     onConfigChange: (AppConfig) -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -407,11 +419,20 @@ private fun LayersPanel(
         border = BorderStroke(1.dp, AdsbColors.Outline),
     ) {
         Column(modifier = Modifier.padding(AdsbDimens.CardPadding)) {
-            Text(
-                "LAYERS",
-                fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.W600,
-                letterSpacing = 1.4.sp, color = AdsbColors.Primary,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "LAYERS",
+                    fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.W600,
+                    letterSpacing = 1.4.sp, color = AdsbColors.Primary,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close layers",
+                    tint = AdsbColors.TextSecondary,
+                    modifier = Modifier.size(16.dp).clickable(onClick = onClose),
+                )
+            }
             Spacer(Modifier.height(AdsbDimens.SpacingSm))
             CheckRow("Range rings", config.mapShowRangeRings) {
                 onConfigChange(config.copy(mapShowRangeRings = it))

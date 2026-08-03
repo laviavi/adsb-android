@@ -67,17 +67,29 @@ class OfflineMapsViewModel @Inject constructor(
 
     init { refresh() }
 
+    /**
+     * All of this is file I/O — the manifest, every tile's on-disk size, and (for
+     * [OfflineMapManager.storageUsage]) a `File.length()` stat per stored tile key.
+     * That is cheap for a handful of segments but not for a large downloaded region,
+     * so it must never run on the caller's thread, including the very first call
+     * from [init].
+     */
     fun refresh() {
-        _uiState.value = _uiState.value.copy(
-            segments = manager.segments(),
-            usage = manager.storageUsage(),
-            networkState = eligibility.currentState(),
-            pendingSuggestions = manager.pendingTravelSuggestions(),
-            resumable = manager.resumableCoverage(),
-        )
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            val segments = manager.segments()
+            val usage = manager.storageUsage()
+            val networkState = eligibility.currentState()
+            val pendingSuggestions = manager.pendingTravelSuggestions()
+            val resumable = manager.resumableCoverage()
             val configured = runCatching { configStore.load().offlineDownloadConfigured }.getOrDefault(false)
-            _uiState.value = _uiState.value.copy(downloadConfigured = configured)
+            _uiState.value = _uiState.value.copy(
+                segments = segments,
+                usage = usage,
+                networkState = networkState,
+                pendingSuggestions = pendingSuggestions,
+                resumable = resumable,
+                downloadConfigured = configured,
+            )
         }
     }
 

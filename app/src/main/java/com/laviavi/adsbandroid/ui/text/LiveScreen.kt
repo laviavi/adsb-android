@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
+import com.laviavi.adsbandroid.capture.UsbHotplugReceiver
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.pipeline.SourceState
 import com.laviavi.adsbandroid.ui.MainViewModel
@@ -53,6 +55,7 @@ fun LiveScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onReconnect: () -> Unit,
+    onResetCounters: () -> Unit,
 ) {
     val rows by viewModel.aircraftRows.collectAsStateWithLifecycle()
     val trackedCount by viewModel.trackedCount.collectAsStateWithLifecycle()
@@ -130,7 +133,10 @@ fun LiveScreen(
                 }
                 DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
                     DropdownMenuItem(text = { Text("Reconnect source") }, onClick = { showOverflowMenu = false; onReconnect() })
-                    DropdownMenuItem(text = { Text("Reset counters") }, onClick = { showOverflowMenu = false })
+                    DropdownMenuItem(
+                        text = { Text("Reset counters") },
+                        onClick = { showOverflowMenu = false; onResetCounters() },
+                    )
                 }
             }
         }
@@ -456,14 +462,17 @@ private fun NonNominalState(
             headline = "Listening…",
             body = "Connecting to the SDR dongle and waiting for ADS-B frames.",
         )
-        is SourceState.DriverNotInstalled -> StatusPanel(
-            icon = { Text("○", fontSize = 44.sp, color = AdsbColors.TextDisabled) },
-            headline = "RTL-SDR driver app not installed",
-            body = "Install the RTL-SDR driver app from the Play Store to use your dongle.",
-            action = {
-                OutlinedButton(onClick = {}) { Text("Install") }
-            },
-        )
+        is SourceState.DriverNotInstalled -> {
+            val context = LocalContext.current
+            StatusPanel(
+                icon = { Text("○", fontSize = 44.sp, color = AdsbColors.TextDisabled) },
+                headline = "RTL-SDR driver app not installed",
+                body = "Install the RTL-SDR driver app from the Play Store to use your dongle.",
+                action = {
+                    OutlinedButton(onClick = { UsbHotplugReceiver.openDriverInstallPage(context) }) { Text("Install") }
+                },
+            )
+        }
         is SourceState.Error -> StatusPanel(
             icon = { Text("✕", fontSize = 40.sp, color = AdsbColors.Error) },
             headline = "Receiver error",
@@ -473,7 +482,7 @@ private fun NonNominalState(
                     Button(onClick = onStart, colors = ButtonDefaults.buttonColors(containerColor = AdsbColors.Primary)) {
                         Text("Reconnect")
                     }
-                    OutlinedButton(onClick = onNavigateToReceiver) { Text("View logs") }
+                    OutlinedButton(onClick = onNavigateToReceiver) { Text("Open Receiver") }
                 }
             },
         )

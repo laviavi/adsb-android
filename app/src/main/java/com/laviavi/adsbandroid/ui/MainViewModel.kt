@@ -6,6 +6,7 @@ import com.laviavi.adsbandroid.aircraft.AircraftState
 import com.laviavi.adsbandroid.capture.GainOptions
 import com.laviavi.adsbandroid.observability.CoverageMetricsRow
 import com.laviavi.adsbandroid.data.AircraftSeenEntity
+import com.laviavi.adsbandroid.data.AircraftVisitEntity
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.pipeline.PipelineStats
 import com.laviavi.adsbandroid.pipeline.SourceState
@@ -27,6 +28,9 @@ class MainViewModel @Inject constructor() : ViewModel() {
     private val _history = MutableStateFlow<List<AircraftSeenEntity>>(emptyList())
     val history: StateFlow<List<AircraftSeenEntity>> = _history.asStateFlow()
 
+    private val _visits = MutableStateFlow<List<AircraftVisitEntity>>(emptyList())
+    val visits: StateFlow<List<AircraftVisitEntity>> = _visits.asStateFlow()
+
     private val _stats = MutableStateFlow(PipelineStats.Snapshot())
     val stats: StateFlow<PipelineStats.Snapshot> = _stats.asStateFlow()
 
@@ -38,6 +42,11 @@ class MainViewModel @Inject constructor() : ViewModel() {
 
     private val _config = MutableStateFlow(AppConfig())
     val config: StateFlow<AppConfig> = _config.asStateFlow()
+
+    /** Resolved observer lat/lon — the live GPS fix in FOLLOW_GPS mode, else the fixed coordinates. */
+    private val _observerPosition = MutableStateFlow(AppConfig().observerLatitude to AppConfig().observerLongitude)
+    val observerPosition: StateFlow<Pair<Double, Double>> = _observerPosition.asStateFlow()
+    fun onObserverPosition(position: Pair<Double, Double>) { _observerPosition.value = position }
 
     private val _gainOptions = MutableStateFlow<GainOptions>(
         GainOptions.Unavailable("Connect a USB dongle to read its supported gain levels.")
@@ -145,6 +154,7 @@ class MainViewModel @Inject constructor() : ViewModel() {
     // --- Service callbacks ---
 
     fun onHistoryUpdate(list: List<AircraftSeenEntity>) { _history.value = list }
+    fun onVisitsUpdate(list: List<AircraftVisitEntity>) { _visits.value = list }
     fun onDroppedBatches(count: Long) { _droppedBatches.value = count }
     fun onGainOptions(options: GainOptions) { _gainOptions.value = options }
     fun onAircraftUpdate(list: List<AircraftState>) {

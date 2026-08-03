@@ -16,6 +16,13 @@ import com.laviavi.adsbandroid.decoder.RawFrame
  * Recovery identity: because the CRC is linear and AP = CRC(data) XOR addr,
  * the remainder over the *whole* frame equals the address itself —
  * so [computeCrc] of the full frame IS the candidate ICAO. Verified in tests.
+ *
+ * Correction: single-bit correction on DF17/18 mirrors Python's
+ * `_try_single_bit_correction`. Two-bit correction ([correctTwoBits]) is a
+ * deliberate divergence Python does not have — ambiguous syndromes (more than
+ * one bit-pair could produce them) are rejected rather than guessed, but the
+ * false-accept rate is still higher than single-bit (~3828 candidate pairs vs.
+ * 88 single-bit positions, so a coincidental accept is roughly 44x likelier).
  */
 object CrcChecker {
 
@@ -55,14 +62,21 @@ object CrcChecker {
 
     private val singleBitSyndromes: Map<Int, Int> by lazy { buildSingleBitSyndromes() }
 
+    /** syndrome -> every payload-bit pair that could produce it (collisions kept, not resolved). */
+    private val twoBitSyndromes: Map<Int, List<Pair<Int, Int>>> by lazy { buildTwoBitSyndromes() }
+
     /**
      * @param icaoCache required to validate parity-address frames. When null, AP
      *   frames can only ever be reported as [CrcResult.PARITY_ADDRESS].
+     * @param correctTwoBit independent of [correctSingleBit] — either, both, or
+     *   neither may be enabled. Off by default: see the class doc comment for the
+     *   higher false-accept risk relative to single-bit.
      */
     fun check(
         frame: RawFrame,
         correctSingleBit: Boolean = true,
         icaoCache: IcaoCache? = null,
+        correctTwoBit: Boolean = false,
     ): CheckedFrame {
         val crc = computeCrc(frame.bytes)
         val df = frame.downlinkFormat
@@ -80,16 +94,21 @@ object CrcChecker {
                     return CheckedFrame(frame, CrcResult.VALID, crc)
                 }
             }
-            if (df in setOf(17, 18) && correctSingleBit && frame.bytes.size == 14) {
-                val bitPos = singleBitSyndromes[crc]
-                if (bitPos != null) {
-                    val corrected = frame.bytes.copyOf()
-                    corrected[bitPos / 8] = corrected[bitPos / 8] xor (1 shl (7 - bitPos % 8))
-                    if (computeCrc(corrected) == 0) {
-                        val fixed = frame.copy(bytes = corrected)
-                        icaoCache?.let { cache -> frameIcao(fixed)?.let { cache.add(it) } }
-                        return CheckedFrame(fixed, CrcResult.CORRECTED, 0)
+            if (df in setOf(17, 18) && frame.bytes.size == 14) {
+                if (correctSingleBit) {
+                    val bitPos = singleBitSyndromes[crc]
+                    if (bitPos != null) {
+                        val corrected = frame.bytes.copyOf()
+                        corrected[bitPos / 8] = corrected[bitPos / 8] xor (1 shl (7 - bitPos % 8))
+                        if (computeCrc(corrected) == 0) {
+                            val fixed = frame.copy(bytes = corrected)
+                            icaoCache?.let { cache -> frameIcao(fixed)?.let { cache.add(it) } }
+                            return CheckedFrame(fixed, CrcResult.CORRECTED, 0)
+                        }
                     }
+                }
+                if (correctTwoBit) {
+                    correctTwoBits(frame, crc, icaoCache)?.let { return it }
                 }
             }
             return CheckedFrame(frame, CrcResult.INVALID, crc)
@@ -101,6 +120,20 @@ object CrcChecker {
             return CheckedFrame(frame, CrcResult.RECOVERED, crc, recoveredIcao = crc)
         }
         return CheckedFrame(frame, CrcResult.PARITY_ADDRESS, crc)
+    }
+
+    /** Flips payload bits [a] and [b]; returns the corrected frame if that zeroes the CRC. */
+    private fun correctTwoBits(frame: RawFrame, crc: Int, icaoCache: IcaoCache?): CheckedFrame? {
+        val candidates = twoBitSyndromes[crc] ?: return null
+        if (candidates.size != 1) return null // ambiguous syndrome — reject rather than guess
+        val (a, b) = candidates[0]
+        val corrected = frame.bytes.copyOf()
+        corrected[a / 8] = corrected[a / 8] xor (1 shl (7 - a % 8))
+        corrected[b / 8] = corrected[b / 8] xor (1 shl (7 - b % 8))
+        if (computeCrc(corrected) != 0) return null
+        val fixed = frame.copy(bytes = corrected)
+        icaoCache?.let { cache -> frameIcao(fixed)?.let { cache.add(it) } }
+        return CheckedFrame(fixed, CrcResult.CORRECTED, 0)
     }
 
     /** ICAO from bytes 1-3 — only meaningful for pure-CRC DFs. */
@@ -137,6 +170,28 @@ object CrcChecker {
             val syndrome = computeCrc(msg)
             if (syndrome != 0) map[syndrome] = i
             msg[i / 8] = msg[i / 8] xor (1 shl (7 - i % 8))
+        }
+        return map
+    }
+
+    /**
+     * Syndrome candidates for all C(88, 2) = 3,828 payload-bit pairs, from CRC
+     * linearity: syndrome(bitA + bitB) = syndrome(bitA) XOR syndrome(bitB).
+     */
+    private fun buildTwoBitSyndromes(): Map<Int, List<Pair<Int, Int>>> {
+        val bitSyndromes = IntArray(88)
+        val msg = IntArray(14)
+        for (i in 0 until 88) {
+            msg[i / 8] = msg[i / 8] xor (1 shl (7 - i % 8))
+            bitSyndromes[i] = computeCrc(msg)
+            msg[i / 8] = msg[i / 8] xor (1 shl (7 - i % 8))
+        }
+        val map = HashMap<Int, MutableList<Pair<Int, Int>>>()
+        for (a in 0 until 87) {
+            for (b in a + 1 until 88) {
+                val syndrome = bitSyndromes[a] xor bitSyndromes[b]
+                if (syndrome != 0) map.getOrPut(syndrome) { ArrayList(1) }.add(a to b)
+            }
         }
         return map
     }

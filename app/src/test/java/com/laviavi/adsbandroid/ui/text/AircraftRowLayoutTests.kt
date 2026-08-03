@@ -2,6 +2,8 @@ package com.laviavi.adsbandroid.ui.text
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -68,7 +70,12 @@ class AircraftRowLayoutTests {
 
     private fun assertLayout(screenWidth: Dp) {
         rule.setContent {
-            Column(modifier = Modifier.requiredWidth(screenWidth)) {
+            // Scrollable so the Column measures at its natural height regardless of the
+            // Robolectric root's virtual screen height — matches the real list, which is a
+            // LazyColumn and never height-constrains an off-screen row's measurement either.
+            // Without this, stacking enough rows to exceed that bound silently clamps the
+            // last row's last line, which is a test-harness artifact, not a real layout bug.
+            Column(modifier = Modifier.requiredWidth(screenWidth).verticalScroll(rememberScrollState())) {
                 samples.forEach { AircraftRow(row = it, onClick = {}) }
             }
         }

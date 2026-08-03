@@ -25,12 +25,15 @@ import com.laviavi.adsbandroid.data.AircraftMetaEnrichment
 import com.laviavi.adsbandroid.data.AircraftSeenDao
 import com.laviavi.adsbandroid.data.AircraftSeenEntity
 import com.laviavi.adsbandroid.data.AircraftHistoryEntity
+import com.laviavi.adsbandroid.data.AircraftVisitDao
+import com.laviavi.adsbandroid.data.AircraftVisitEntity
 import com.laviavi.adsbandroid.data.EnrichmentCacheDao
 import com.laviavi.adsbandroid.data.FlightAwareEnrichment
 import com.laviavi.adsbandroid.data.IcaoLookup
 import com.laviavi.adsbandroid.data.typeDisplay
 import com.laviavi.adsbandroid.data.RouteEnrichment
 import com.laviavi.adsbandroid.enrich.Airlines
+import com.laviavi.adsbandroid.enrich.DataSource
 import com.laviavi.adsbandroid.location.GpsPolicy
 import com.laviavi.adsbandroid.location.GpsThrottlePolicy
 import com.laviavi.adsbandroid.location.ObserverMode
@@ -63,6 +66,7 @@ class PipelineService : Service() {
     @Inject lateinit var configStore: AppConfigStore
     @Inject lateinit var historyDao: AircraftHistoryDao
     @Inject lateinit var seenDao: AircraftSeenDao
+    @Inject lateinit var visitDao: AircraftVisitDao
     @Inject lateinit var enrichmentDao: EnrichmentCacheDao
     @Inject lateinit var aircraftMetaCacheDao: AircraftMetaCacheDao
     @Inject lateinit var offlineMapManager: com.laviavi.adsbandroid.offline.OfflineMapManager
@@ -134,8 +138,26 @@ class PipelineService : Service() {
     /** Aircraft that have left the live list, newest departure first. Room-backed. */
     val history by lazy { seenDao.observeAll() }
 
+    /** Every departure ever recorded, newest first — independent of [history]/Clear. Backs the Stats screen. */
+    val visits by lazy { visitDao.observeAll() }
+
     fun clearHistory() {
         serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { seenDao.clear() } }
+    }
+
+    /** Writes the History screen's data to a CSV under app external storage; null on failure. */
+    fun exportHistoryCsv(onResult: (java.io.File?) -> Unit = {}) {
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val file = runCatching {
+                com.laviavi.adsbandroid.data.CsvExporter.exportAircraftSeen(applicationContext, seenDao)
+            }.getOrNull()
+            onResult(file)
+        }
+    }
+
+    /** User-triggered from the Live screen's overflow menu — zeroes session totals without a reconnect. */
+    fun resetStatsCounters() {
+        stats.reset()
     }
 
     private val _sourceState = MutableStateFlow<SourceState>(SourceState.Idle)
@@ -147,6 +169,11 @@ class PipelineService : Service() {
 
     private val _config = MutableStateFlow(AppConfig())
     val config: StateFlow<AppConfig> = _config.asStateFlow()
+
+    /** Resolved observer lat/lon — the live GPS fix in FOLLOW_GPS mode, else the fixed coordinates. */
+    private val _resolvedObserverPosition =
+        MutableStateFlow(AppConfig().observerLatitude to AppConfig().observerLongitude)
+    val resolvedObserverPosition: StateFlow<Pair<Double, Double>> = _resolvedObserverPosition.asStateFlow()
 
     /** Manual gain steps reported by the attached dongle, or why they're unavailable. */
     private val _gainOptions = MutableStateFlow<GainOptions>(
@@ -279,6 +306,7 @@ class PipelineService : Service() {
             updateForegroundLocationType()
             sessionLock.withLock { startPipelineInternal() }
             requestFreshGpsFix() // "at every app start" - never trust a cached/last-known fix
+            refreshGpsCoordinates() // ditto, but persisted as the saved coordinates regardless of mode
         }
         serviceScope.launch {
             _sourceState.collect { state ->
@@ -383,6 +411,40 @@ class PipelineService : Service() {
     }
 
     /**
+     * One-shot high-accuracy fix that is *persisted* as the saved observer
+     * coordinates, independent of Fixed/Follow-GPS mode. Runs at every app start
+     * and from the Settings "Update GPS" button — unlike [requestFreshGpsFix],
+     * which only feeds the live/transient position while Follow GPS is active.
+     */
+    fun refreshGpsCoordinates(onResult: (Boolean) -> Unit = {}) {
+        if (!locationProvider.hasPermission()) {
+            onResult(false)
+            return
+        }
+        // The foreground service must hold the LOCATION type for the duration of
+        // any location API call (Android 14+) — normally only promoted in
+        // Follow-GPS mode by updateForegroundLocationType(), so promote it here
+        // for this one-shot fetch and let that function settle it back after.
+        ServiceCompat.startForeground(
+            this, NOTIFICATION_ID, buildNotification(lastNotificationText),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+        )
+        serviceScope.launch {
+            val fix = locationProvider.requestFreshFix()
+            updateForegroundLocationType()
+            if (fix == null) {
+                onResult(false)
+                return@launch
+            }
+            val updated = currentConfig.copy(observerLatitude = fix.latitude, observerLongitude = fix.longitude)
+            _config.value = updated
+            withContext(Dispatchers.IO) { runCatching { configStore.save(updated) } }
+            applyObserverPosition()
+            onResult(true)
+        }
+    }
+
+    /**
      * Promotes/demotes the running foreground service's declared type set. Android 14+
      * requires the "location" type to be actively held (via this call, not just the
      * manifest) before any location API use, foreground-service-only - no background
@@ -431,6 +493,7 @@ class PipelineService : Service() {
         decoder.observerLat = lat
         decoder.observerLon = lon
         receiverRepository.setObserverPosition(lat, lon)
+        _resolvedObserverPosition.value = lat to lon
     }
 
     fun stopPipeline() {
@@ -624,6 +687,21 @@ class PipelineService : Service() {
                         lastSeenMs    = s.lastSeenMs,
                     ))
                 }
+                // Independent of aircraft_seen above: one row per departure, never
+                // replaced, so it survives History's Clear and builds a "times seen"
+                // log the Stats screen reads from.
+                runCatching {
+                    visitDao.insert(AircraftVisitEntity(
+                        icao          = s.icao,
+                        registration  = s.registration,
+                        operator      = s.operator,
+                        aircraftType  = s.aircraftType,
+                        isAirline     = s.operatorSource == DataSource.ALGORITHMIC,
+                        firstSeenMs   = s.firstSeenMs,
+                        lastSeenMs    = s.lastSeenMs,
+                        messageCount  = s.messageCount,
+                    ))
+                }
             }
         }
     }
@@ -773,7 +851,12 @@ class PipelineService : Service() {
             if (currentConfig.rawLoggingEnabled) {
                 rawLogger.log(frame.bytes.joinToString("") { "%02X".format(it) })
             }
-            val checked = CrcChecker.check(frame, currentConfig.crcCorrectSingleBit, icaoCache)
+            val checked = CrcChecker.check(
+                frame,
+                currentConfig.crcCorrectSingleBit,
+                icaoCache,
+                currentConfig.crcCorrectTwoBit,
+            )
             stats.totalMessages.incrementAndGet()
             when (checked.crcResult) {
                 // RECOVERED = parity-address frame whose address matched a

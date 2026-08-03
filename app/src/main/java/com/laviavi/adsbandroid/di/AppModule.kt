@@ -6,11 +6,13 @@ import com.laviavi.adsbandroid.data.AppDatabase
 import com.laviavi.adsbandroid.data.AircraftHistoryDao
 import com.laviavi.adsbandroid.data.AircraftMetaCacheDao
 import com.laviavi.adsbandroid.data.AircraftSeenDao
+import com.laviavi.adsbandroid.data.AircraftVisitDao
 import com.laviavi.adsbandroid.data.EnrichmentCacheDao
 import com.laviavi.adsbandroid.data.MIGRATION_1_2
 import com.laviavi.adsbandroid.data.MIGRATION_2_3
 import com.laviavi.adsbandroid.data.MIGRATION_3_4
 import com.laviavi.adsbandroid.data.MIGRATION_4_5
+import com.laviavi.adsbandroid.data.MIGRATION_5_6
 import com.laviavi.adsbandroid.offline.AndroidLocationNamer
 import com.laviavi.adsbandroid.offline.AndroidNetworkEligibility
 import com.laviavi.adsbandroid.offline.ConfigurableTileDownloader
@@ -46,7 +48,7 @@ object AppModule {
         AppConfigStore(ctx)
     @Provides @Singleton fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
         Room.databaseBuilder(ctx, AppDatabase::class.java, "adsb.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             // Only a genuine downgrade (e.g. switching to an older debug build)
             // falls back to a wipe now — every historical upgrade path (v1-v3)
             // is covered by an explicit migration above.
@@ -56,6 +58,7 @@ object AppModule {
     @Provides fun provideSeenDao(db: AppDatabase): AircraftSeenDao = db.aircraftSeenDao()
     @Provides fun provideEnrichmentDao(db: AppDatabase): EnrichmentCacheDao = db.enrichmentCacheDao()
     @Provides fun provideAircraftMetaCacheDao(db: AppDatabase): AircraftMetaCacheDao = db.aircraftMetaCacheDao()
+    @Provides fun provideAircraftVisitDao(db: AppDatabase): AircraftVisitDao = db.aircraftVisitDao()
 
     // ── Offline maps ──────────────────────────────────────────────────────────
 

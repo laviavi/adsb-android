@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Matches File(context.getExternalFilesDir(null), ...) in CsvExporter. -->
+    <external-files-path name="exports" path="." />
+</paths>

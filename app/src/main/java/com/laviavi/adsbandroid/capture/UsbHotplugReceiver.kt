@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import androidx.core.content.ContextCompat
 
 /**
@@ -58,6 +59,19 @@ class UsbHotplugReceiver(
             true
         } catch (e: Exception) {
             false
+        }
+
+        /** Opens the driver's Play Store listing, falling back to a browser if Play Store itself is absent. */
+        fun openDriverInstallPage(context: Context) {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(DRIVER_PLAY_URL)
+                setPackage("com.android.vending")
+            }
+            try {
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DRIVER_PLAY_URL)))
+            }
         }
 
         fun register(context: Context, receiver: UsbHotplugReceiver) {

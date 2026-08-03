@@ -40,6 +40,12 @@ data class AppConfig(
     val deltaFloor: Int                 = DEFAULT_DELTA_FLOOR,
 
     val crcCorrectSingleBit: Boolean    = true,
+    /**
+     * Independent of [crcCorrectSingleBit] — either, both, or neither may be on.
+     * Off by default: two-bit correction has a higher false-accept rate than
+     * single-bit (see [com.laviavi.adsbandroid.crc.CrcChecker]'s doc comment).
+     */
+    val crcCorrectTwoBit: Boolean       = false,
     val aircraftExpirySeconds: Int      = 60,
     /**
      * Master network kill switch. When true nothing in the app opens a socket —
@@ -86,6 +92,13 @@ data class AppConfig(
     val mapShowGroundTraffic: Boolean   = true,
     /** Trail length in points. One of [TRAIL_LENGTHS]; 0 = trails off. */
     val mapTrailLength: Int             = 0,
+    /**
+     * Range rings drawn around the observer, in statute miles, innermost first.
+     * User-configurable in Settings — up to [MAX_MAP_RINGS] entries, each up to
+     * [MAX_MAP_RING_MI] mi. Not sorted on write; sorted at the point of use so
+     * editing one ring's value never reorders the rows the user is looking at.
+     */
+    val mapRingRadiiMi: List<Int>       = listOf(10, 20, 30),
 
     /**
      * Tile endpoint for *downloading* offline maps, with `{z}`/`{x}`/`{y}` placeholders.
@@ -131,6 +144,9 @@ data class AppConfig(
 
         /** Trail lengths offered by the map layers panel, per the design spec. */
         val TRAIL_LENGTHS = listOf(0, 10, 50, 200)
+
+        const val MAX_MAP_RINGS = 5
+        const val MAX_MAP_RING_MI = 250
     }
 }
 

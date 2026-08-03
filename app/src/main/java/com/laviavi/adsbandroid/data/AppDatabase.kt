@@ -60,6 +60,9 @@ data class AircraftSeenEntity(
     @Query("SELECT * FROM aircraft_seen ORDER BY lastSeenMs DESC")
     fun observeAll(): Flow<List<AircraftSeenEntity>>
 
+    @Query("SELECT * FROM aircraft_seen ORDER BY lastSeenMs DESC")
+    suspend fun getAllOnce(): List<AircraftSeenEntity>
+
     @Query("SELECT COUNT(*) FROM aircraft_seen")
     suspend fun count(): Int
 
@@ -68,6 +71,34 @@ data class AircraftSeenEntity(
 
     @Query("DELETE FROM aircraft_seen")
     suspend fun clear()
+}
+
+/**
+ * One row per departure — an append-only log, unlike [AircraftSeenEntity] which
+ * replaces its row on every re-sighting. Powers the aircraft-stats screen's "times
+ * seen" counts and per-aircraft visit history; independent of `aircraft_seen` so
+ * clearing History never touches it.
+ */
+@Entity(tableName = "aircraft_visits", indices = [Index("icao")])
+data class AircraftVisitEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val icao: String,
+    val registration: String?,
+    val operator: String?,
+    val aircraftType: String?,
+    /** True only when [operator] resolved from the callsign prefix (`Airlines.fromCallsign`, ALGORITHMIC) — see `OfflineEnrichment.enrich`. Everything else counts as private. */
+    val isAirline: Boolean,
+    val firstSeenMs: Long,
+    val lastSeenMs: Long,
+    val messageCount: Int,
+)
+
+@Dao interface AircraftVisitDao {
+    @Insert
+    suspend fun insert(visit: AircraftVisitEntity)
+
+    @Query("SELECT * FROM aircraft_visits ORDER BY firstSeenMs DESC")
+    fun observeAll(): Flow<List<AircraftVisitEntity>>
 }
 
 @Entity(tableName = "enrichment_cache")
@@ -110,14 +141,16 @@ data class AircraftMetaCacheEntity(
         AircraftSeenEntity::class,
         EnrichmentCacheEntity::class,
         AircraftMetaCacheEntity::class,
+        AircraftVisitEntity::class,
     ],
-    version = 5,
+    version = 6,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftHistoryDao(): AircraftHistoryDao
     abstract fun aircraftSeenDao(): AircraftSeenDao
     abstract fun enrichmentCacheDao(): EnrichmentCacheDao
     abstract fun aircraftMetaCacheDao(): AircraftMetaCacheDao
+    abstract fun aircraftVisitDao(): AircraftVisitDao
 }
 
 /**
@@ -198,6 +231,28 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("DROP TABLE IF EXISTS `faa_aircraft`")
+    }
+}
+
+/** v5 -> v6: added `aircraft_visits`, the append-only log the aircraft-stats screen reads. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `aircraft_visits` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `icao` TEXT NOT NULL,
+                `registration` TEXT,
+                `operator` TEXT,
+                `aircraftType` TEXT,
+                `isAirline` INTEGER NOT NULL,
+                `firstSeenMs` INTEGER NOT NULL,
+                `lastSeenMs` INTEGER NOT NULL,
+                `messageCount` INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_aircraft_visits_icao` ON `aircraft_visits` (`icao`)")
     }
 }
 

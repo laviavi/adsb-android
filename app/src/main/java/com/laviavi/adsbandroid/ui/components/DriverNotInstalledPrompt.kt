@@ -1,7 +1,5 @@
 package com.laviavi.adsbandroid.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
@@ -53,19 +51,7 @@ fun DriverNotInstalledPrompt(
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    data = Uri.parse(
-                        "https://play.google.com/store/apps/details?id=${UsbHotplugReceiver.DRIVER_PACKAGE}"
-                    )
-                    setPackage("com.android.vending")
-                }
-                try { context.startActivity(intent) }
-                catch (e: Exception) {
-                    context.startActivity(Intent(Intent.ACTION_VIEW,
-                        Uri.parse(UsbHotplugReceiver.DRIVER_PLAY_URL)))
-                }
-            }) { Text("Install Driver") }
+            Button(onClick = { UsbHotplugReceiver.openDriverInstallPage(context) }) { Text("Install Driver") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Not now") }
