@@ -1493,3 +1493,28 @@ each option's required attribution as its row subtitle.
 
 Full suite: 400 core + 69 app tests (9 new: 4 `CoverageMetricsTests.SynthesizeAllTimeRow`
 + 4 `BestRangeTests` + 1 migration test), 0 failures; debug APK builds.
+
+## 29. Base-map dark filter was leaking onto Esri imagery (2026-08-03, v1.6.1)
+
+**Bug found via Avi's own testing.** Both OSM and Esri satellite imagery rendered
+identically dark/grayscale-inverted, even though `MapScreen.kt` only intended the
+invert-and-desaturate `darkTileFilter()` for OSM (`if (baseMap == BaseMap.OSM)
+darkTileFilter() else null`). Root cause: passing `null` to
+`TilesOverlay.setColorFilter()` to *clear* a previously-set filter isn't reliable
+— osmdroid's `TilesOverlay` appears to treat a `null` argument as "no explicit
+override" rather than "definitely clear the existing one," so once the invert
+filter was set (e.g. from an initial OSM render, or a prior selection), switching
+to Esri never actually removed it.
+
+**Fix:** never pass `null`. Added `identityTileFilter` (a `ColorMatrixColorFilter`
+built from an identity `ColorMatrix` — a real, distinct filter object that changes
+nothing) as the explicit "off" state, applied via a new `tileFilterFor(baseMap)`
+helper used at both the initial `MapView` setup and the `LaunchedEffect(config.mapBaseMap)`
+live-switch. This guarantees the library always receives a genuinely different,
+non-null filter object on every base-map change, rather than relying on `null`
+being handled as "clear."
+
+Not yet confirmed on-device — diagnosed and fixed from Avi's description (Esri
+"grayscale/inverted, same as OSM") plus reading fetched OSM/Esri sample tiles
+directly (both render normally/colorfully outside the app, confirming the bug was
+in the app's filter application, not the tile sources themselves).

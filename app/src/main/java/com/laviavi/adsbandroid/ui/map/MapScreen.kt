@@ -136,9 +136,7 @@ fun MapScreen(
             // competing with the marker palette. Esri's imagery is real satellite
             // photography — inverting it would turn real-world colors to nonsense,
             // so only OSM gets the filter.
-            overlayManager.tilesOverlay.setColorFilter(
-                if (config.mapBaseMap == BaseMap.OSM) darkTileFilter() else null,
-            )
+            overlayManager.tilesOverlay.setColorFilter(tileFilterFor(config.mapBaseMap))
         }
     }
     val overlay = remember { AircraftOverlay(density) }
@@ -160,9 +158,7 @@ fun MapScreen(
     // for the destination's whole lifetime" reasoning as the offlineMode effect above.
     LaunchedEffect(config.mapBaseMap) {
         mapView.setTileSource(buildTileSource(config.mapBaseMap))
-        mapView.overlayManager.tilesOverlay.setColorFilter(
-            if (config.mapBaseMap == BaseMap.OSM) darkTileFilter() else null,
-        )
+        mapView.overlayManager.tilesOverlay.setColorFilter(tileFilterFor(config.mapBaseMap))
         mapView.invalidate()
     }
 
@@ -303,6 +299,12 @@ private fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
     desaturate.postConcat(invert)
     return android.graphics.ColorMatrixColorFilter(desaturate)
 }
+
+/** Identity matrix — a real, non-null filter so a switch away from OSM definitely clears the invert rather than leaving it in place. */
+private val identityTileFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix())
+
+private fun tileFilterFor(baseMap: BaseMap): android.graphics.ColorMatrixColorFilter =
+    if (baseMap == BaseMap.OSM) darkTileFilter() else identityTileFilter
 
 /**
  * Tile zoom at which the outer ring spans ~80 % of the shorter screen edge.
