@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
+import com.laviavi.adsbandroid.map.BaseMap
 import com.laviavi.adsbandroid.units.DistanceUnit
 import kotlinx.coroutines.flow.first
 
@@ -46,6 +47,7 @@ class AppConfigStore(private val context: Context) {
         val mapGroundTraffic     = booleanPreferencesKey("map_show_ground_traffic")
         val mapTrailLength       = intPreferencesKey("map_trail_length")
         val mapRingRadii         = stringPreferencesKey("map_ring_radii_mi")
+        val mapBaseMap           = stringPreferencesKey("map_base_map")
     }
 
     suspend fun load(): AppConfig {
@@ -86,6 +88,9 @@ class AppConfigStore(private val context: Context) {
             mapRingRadiiMi = prefs[Keys.mapRingRadii]
                 ?.let { s -> if (s.isBlank()) emptyList() else s.split(",").mapNotNull { it.trim().toIntOrNull() } }
                 ?: defaults.mapRingRadiiMi,
+            mapBaseMap = prefs[Keys.mapBaseMap]
+                ?.let { runCatching { BaseMap.valueOf(it) }.getOrNull() }
+                ?: defaults.mapBaseMap,
         )
     }
 
@@ -119,6 +124,7 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.mapGroundTraffic]   = config.mapShowGroundTraffic
             prefs[Keys.mapTrailLength]     = config.mapTrailLength
             prefs[Keys.mapRingRadii]       = config.mapRingRadiiMi.joinToString(",")
+            prefs[Keys.mapBaseMap]         = config.mapBaseMap.name
         }
     }
 }

@@ -174,4 +174,48 @@ class CoverageMetricsTests {
             )
         }
     }
+
+    @Nested inner class SynthesizeAllTimeRow {
+
+        @Test fun `empty history yields a row with no active sectors`() {
+            val row = CoverageMetrics.synthesizeAllTimeRow(emptyList(), 1.0, 2.0)
+            assertNull(row.bestSector)
+            assertNull(row.worstSector)
+            assertEquals(0, row.aircraftWithPosition)
+            assertTrue(row.sectors.values.all { it.count == 0 && it.maxMi == 0.0 })
+        }
+
+        @Test fun `count and max range are carried through per sector`() {
+            val row = CoverageMetrics.synthesizeAllTimeRow(
+                listOf(SectorTotal(CompassSector.N, count = 12, maxMi = 87.5)), 1.0, 2.0,
+            )
+            val n = row.sectors.getValue(CompassSector.N)
+            assertEquals(12, n.count)
+            assertEquals(87.5, n.maxMi, 1e-9)
+            // Deliberate simplification: median/p90 collapse to max, since only
+            // count/max survive the persisted aggregation.
+            assertEquals(87.5, n.medianMi, 1e-9)
+            assertEquals(87.5, n.p90Mi, 1e-9)
+        }
+
+        @Test fun `best and worst sector are the widest and narrowest max range`() {
+            val row = CoverageMetrics.synthesizeAllTimeRow(
+                listOf(
+                    SectorTotal(CompassSector.N, count = 5, maxMi = 100.0),
+                    SectorTotal(CompassSector.S, count = 5, maxMi = 20.0),
+                ),
+                1.0, 2.0,
+            )
+            assertEquals(CompassSector.N, row.bestSector)
+            assertEquals(CompassSector.S, row.worstSector)
+        }
+
+        @Test fun `sectors absent from history report zero, not missing`() {
+            val row = CoverageMetrics.synthesizeAllTimeRow(
+                listOf(SectorTotal(CompassSector.N, count = 1, maxMi = 10.0)), 1.0, 2.0,
+            )
+            assertEquals(8, row.sectors.size)
+            assertEquals(0, row.sectors.getValue(CompassSector.E).count)
+        }
+    }
 }

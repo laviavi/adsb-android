@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.laviavi.adsbandroid.map.BaseMap
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.ui.MainViewModel
 import com.laviavi.adsbandroid.ui.model.MapMarker
@@ -38,10 +39,27 @@ import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 import com.laviavi.adsbandroid.units.DistanceUnit
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.ITileSource
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Overlay
+
+/**
+ * Builds a live tile source from a [BaseMap]'s `{z}/{x}/{y}`-style template — the
+ * same placeholder convention `offline/OsmTileDownloader.kt` uses for downloads,
+ * adapted here to osmdroid's own tile-loading interface since the base map can
+ * change while the screen is open (unlike `TileSourceFactory.MAPNIK`, a fixed
+ * singleton with no template to swap).
+ */
+private fun buildTileSource(baseMap: BaseMap): ITileSource =
+    object : OnlineTileSourceBase(baseMap.name, 0, 19, 256, "", arrayOf(baseMap.urlTemplate)) {
+        override fun getTileURLString(pMapTileIndex: Long): String = baseMap.urlTemplate
+            .replace("{z}", MapTileIndex.getZoom(pMapTileIndex).toString())
+            .replace("{x}", MapTileIndex.getX(pMapTileIndex).toString())
+            .replace("{y}", MapTileIndex.getY(pMapTileIndex).toString())
+    }
 
 /**
  * Zoom steps a named range scale rather than free zoom levels: the operator thinks
@@ -105,7 +123,7 @@ fun MapScreen(
             osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles").apply { mkdirs() }
         }
         MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(buildTileSource(config.mapBaseMap))
             setMultiTouchControls(true)
             // Real value applied by the offlineMode effect below; this only sets the
             // state before the first draw.
@@ -113,10 +131,14 @@ fun MapScreen(
             zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(computeZoom(RangeStep.DEFAULT.outerNm, minDimPx, observer.latitude))
             controller.setCenter(observer)
-            // The console is a dark instrument; Mapnik ships light. Inverting and
-            // desaturating the tiles keeps roads and coastlines legible without
-            // competing with the marker palette.
-            overlayManager.tilesOverlay.setColorFilter(darkTileFilter())
+            // The console is a dark instrument; OSM's vector style ships light, so
+            // inverting and desaturating keeps roads/coastlines legible without
+            // competing with the marker palette. Esri's imagery is real satellite
+            // photography — inverting it would turn real-world colors to nonsense,
+            // so only OSM gets the filter.
+            overlayManager.tilesOverlay.setColorFilter(
+                if (config.mapBaseMap == BaseMap.OSM) darkTileFilter() else null,
+            )
         }
     }
     val overlay = remember { AircraftOverlay(density) }
@@ -131,6 +153,16 @@ fun MapScreen(
     // lifetime — the constructor above runs once and would never see a later toggle.
     LaunchedEffect(config.offlineMode) {
         mapView.setUseDataConnection(!config.offlineMode)
+        mapView.invalidate()
+    }
+
+    // Base map can change in Settings while this screen is open — same "remembered
+    // for the destination's whole lifetime" reasoning as the offlineMode effect above.
+    LaunchedEffect(config.mapBaseMap) {
+        mapView.setTileSource(buildTileSource(config.mapBaseMap))
+        mapView.overlayManager.tilesOverlay.setColorFilter(
+            if (config.mapBaseMap == BaseMap.OSM) darkTileFilter() else null,
+        )
         mapView.invalidate()
     }
 

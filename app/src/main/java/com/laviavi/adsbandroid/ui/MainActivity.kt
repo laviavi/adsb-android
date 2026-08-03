@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch { service.visits.collect { viewModel.onVisitsUpdate(it) } }
             lifecycleScope.launch { service.droppedBatches.collect { viewModel.onDroppedBatches(it) } }
             lifecycleScope.launch { service.coverage.collect { viewModel.onCoverage(it) } }
+            lifecycleScope.launch { service.allTimeCoverage.collect { viewModel.onAllTimeCoverage(it) } }
+            lifecycleScope.launch { service.bestRangeEver.collect { viewModel.onBestRangeEver(it) } }
         }
         override fun onServiceDisconnected(name: ComponentName) {
             pipelineService = null

@@ -86,6 +86,9 @@ data class CoverageMetricsRow(
     val worstSector: CompassSector?,
 )
 
+/** One sector's aggregate over however much history has accumulated — feeds [CoverageMetrics.synthesizeAllTimeRow]. */
+data class SectorTotal(val sector: CompassSector, val count: Int, val maxMi: Double)
+
 /** An aircraft with a known position, pre-resolved to distance/bearing from the observer. */
 data class PositionedAircraft(
     val distanceNm: Double, val bearingDeg: Double, val altitudeFt: Int?,
@@ -190,6 +193,40 @@ object CoverageMetrics {
             symmetryScore = symmetryScore(sectorMedians),
             bestSector = best,
             worstSector = worst,
+        )
+    }
+
+    /**
+     * Builds a [CoverageMetricsRow] from history accumulated across many past
+     * 5-minute ticks, rather than one live window — feeds the same [CoveragePolar]
+     * the live view uses, for an "all-time" toggle.
+     *
+     * Deliberate simplification: only count and max range survive the
+     * persisted aggregation (`SUM`/`MAX` over every past tick), not the full
+     * distance distribution — so `medianMi`/`p90Mi` collapse to `maxMi` here.
+     * Altitude-band counts aren't tracked historically at all (empty). The
+     * symmetry score and best/worst sector still reuse [symmetryScore]
+     * unchanged, since those only need the per-sector medians.
+     */
+    fun synthesizeAllTimeRow(totals: List<SectorTotal>, observerLat: Double, observerLon: Double): CoverageMetricsRow {
+        val bySector = totals.associateBy { it.sector }
+        val sectorStats = CompassSector.entries.associateWith { sector ->
+            val t = bySector[sector]
+            SectorStats(count = t?.count ?: 0, maxMi = t?.maxMi ?: 0.0, medianMi = t?.maxMi ?: 0.0, p90Mi = t?.maxMi ?: 0.0)
+        }
+        val sectorMedians = sectorStats.mapValues { it.value.medianMi }
+        val activeSectors = sectorMedians.filterValues { it > 0 }
+
+        return CoverageMetricsRow(
+            intervalSec = 0, // not a fixed window — "all time" has no single interval
+            observerLat = observerLat,
+            observerLon = observerLon,
+            aircraftWithPosition = totals.sumOf { it.count },
+            sectors = sectorStats,
+            altitudeCounts = AltitudeBand.entries.associateWith { 0 },
+            symmetryScore = symmetryScore(sectorMedians),
+            bestSector = activeSectors.maxByOrNull { it.value }?.key,
+            worstSector = activeSectors.minByOrNull { it.value }?.key,
         )
     }
 

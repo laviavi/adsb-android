@@ -22,6 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.laviavi.adsbandroid.aircraft.AircraftManager
 import com.laviavi.adsbandroid.capture.GainOptions
 import com.laviavi.adsbandroid.capture.RtlTcpGain
+import com.laviavi.adsbandroid.data.BestRangeRecordEntity
 import com.laviavi.adsbandroid.observability.AltitudeBand
 import com.laviavi.adsbandroid.observability.CompassSector
 import com.laviavi.adsbandroid.observability.CoverageMetricsRow
@@ -30,9 +31,13 @@ import com.laviavi.adsbandroid.pipeline.PipelineStats
 import com.laviavi.adsbandroid.pipeline.SourceState
 import com.laviavi.adsbandroid.ui.MainViewModel
 import com.laviavi.adsbandroid.ui.model.CoverageMode
+import com.laviavi.adsbandroid.ui.model.CoverageWindow
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 import com.laviavi.adsbandroid.units.DistanceUnit
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /** Statute miles per nautical mile — `CoverageMetrics` reports its ranges in miles. */
@@ -60,7 +65,10 @@ fun ReceiverScreen(
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val droppedBatches by viewModel.droppedBatches.collectAsStateWithLifecycle()
     val coverage by viewModel.coverage.collectAsStateWithLifecycle()
+    val allTimeCoverage by viewModel.allTimeCoverage.collectAsStateWithLifecycle()
+    val bestRangeEver by viewModel.bestRangeEver.collectAsStateWithLifecycle()
     val coverageMode by viewModel.coverageMode.collectAsStateWithLifecycle()
+    val coverageWindow by viewModel.coverageWindow.collectAsStateWithLifecycle()
     val aircraftCount by viewModel.aircraftRows.collectAsStateWithLifecycle()
     val delta by viewModel.tableDelta.collectAsStateWithLifecycle()
 
@@ -85,7 +93,16 @@ fun ReceiverScreen(
             StatusCard(sourceState, gainOptions, config)
             DemodTuningCard(config, stats, onConfigChange)
             PipelineCard(stats, droppedBatches, aircraftCount.size, delta)
-            CoverageCard(coverage, coverageMode, config.distanceUnit, viewModel::setCoverageMode)
+            CoverageCard(
+                liveRow = coverage,
+                allTimeRow = allTimeCoverage,
+                window = coverageWindow,
+                onWindowChange = viewModel::setCoverageWindow,
+                mode = coverageMode,
+                unit = config.distanceUnit,
+                onModeChange = viewModel::setCoverageMode,
+                bestRange = bestRangeEver,
+            )
         }
     }
 }
@@ -477,24 +494,41 @@ private fun PipelineRow(label: String, content: @Composable RowScope.() -> Unit)
 
 // --- Coverage ----------------------------------------------------------------
 
+private val bestRangeDateFormat = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.US)
+
 @Composable
 private fun CoverageCard(
-    row: CoverageMetricsRow?,
+    liveRow: CoverageMetricsRow?,
+    allTimeRow: CoverageMetricsRow?,
+    window: CoverageWindow,
+    onWindowChange: (CoverageWindow) -> Unit,
     mode: CoverageMode,
     unit: DistanceUnit,
     onModeChange: (CoverageMode) -> Unit,
+    bestRange: BestRangeRecordEntity?,
 ) {
+    val row = if (window == CoverageWindow.LIVE) liveRow else allTimeRow
+
     Card("COVERAGE") {
+        WindowToggle(window, onWindowChange)
+
         if (row == null) {
             Text(
-                "No positioned aircrafts yet — coverage needs decoded positions.",
+                if (window == CoverageWindow.LIVE)
+                    "No positioned aircrafts yet — coverage needs decoded positions."
+                else
+                    "No coverage history yet — it accumulates every 5 minutes while running.",
                 fontSize = 12.sp,
                 color = AdsbColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp),
             )
             return@Card
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(AdsbDimens.SpacingSm)) {
+        Row(
+            modifier = Modifier.padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(AdsbDimens.SpacingSm),
+        ) {
             CoveragePolar(
                 row = row,
                 mode = mode,
@@ -553,6 +587,14 @@ private fun CoverageCard(
                     )
                 }
 
+                bestRange?.let {
+                    Text(
+                        "best ever ${unit.formatWhole(it.distanceNm)} · ${it.callsign ?: it.icao} · " +
+                            bestRangeDateFormat.format(Date(it.timestampMs)),
+                        fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.Primary,
+                    )
+                }
+
                 AltitudeHistogram(row)
             }
         }
@@ -577,6 +619,30 @@ private fun ModeToggle(mode: CoverageMode, onChange: (CoverageMode) -> Unit) {
                 modifier = Modifier
                     .background(if (selected) AdsbColors.Primary else Color.Transparent)
                     .clickable { onChange(m) }
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WindowToggle(window: CoverageWindow, onChange: (CoverageWindow) -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(AdsbDimens.PillCornerRadius))
+            .border(1.dp, AdsbColors.Outline, RoundedCornerShape(AdsbDimens.PillCornerRadius)),
+    ) {
+        CoverageWindow.entries.forEach { w ->
+            val selected = w == window
+            Text(
+                w.label,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                fontWeight = if (selected) FontWeight.W700 else FontWeight.W400,
+                color = if (selected) AdsbColors.OnPrimary else AdsbColors.TextSecondary,
+                modifier = Modifier
+                    .background(if (selected) AdsbColors.Primary else Color.Transparent)
+                    .clickable { onChange(w) }
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }

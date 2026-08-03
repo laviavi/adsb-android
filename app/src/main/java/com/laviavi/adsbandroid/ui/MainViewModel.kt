@@ -60,10 +60,23 @@ class MainViewModel @Inject constructor() : ViewModel() {
     val coverage: StateFlow<CoverageMetricsRow?> = _coverage.asStateFlow()
     fun onCoverage(row: CoverageMetricsRow?) { _coverage.value = row }
 
+    private val _allTimeCoverage = MutableStateFlow<CoverageMetricsRow?>(null)
+    val allTimeCoverage: StateFlow<CoverageMetricsRow?> = _allTimeCoverage.asStateFlow()
+    fun onAllTimeCoverage(row: CoverageMetricsRow?) { _allTimeCoverage.value = row }
+
+    private val _bestRangeEver = MutableStateFlow<com.laviavi.adsbandroid.data.BestRangeRecordEntity?>(null)
+    val bestRangeEver: StateFlow<com.laviavi.adsbandroid.data.BestRangeRecordEntity?> = _bestRangeEver.asStateFlow()
+    fun onBestRangeEver(record: com.laviavi.adsbandroid.data.BestRangeRecordEntity?) { _bestRangeEver.value = record }
+
     /** Which metric the coverage polar plots. Presentation-only, not persisted. */
     private val _coverageMode = MutableStateFlow(CoverageMode.RANGE)
     val coverageMode: StateFlow<CoverageMode> = _coverageMode.asStateFlow()
     fun setCoverageMode(mode: CoverageMode) { _coverageMode.value = mode }
+
+    /** Live 5-minute window vs. every tick ever recorded. Presentation-only, not persisted. */
+    private val _coverageWindow = MutableStateFlow(CoverageWindow.LIVE)
+    val coverageWindow: StateFlow<CoverageWindow> = _coverageWindow.asStateFlow()
+    fun setCoverageWindow(window: CoverageWindow) { _coverageWindow.value = window }
 
     /**
      * Aircraft added and removed on the most recent publish — the `+3 · −1` on the

@@ -76,7 +76,7 @@ class AppDatabaseMigrationTests {
         // AppDatabase's actual entities — a wrong migration throws here rather
         // than silently succeeding.
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .build()
 
         runBlocking {
@@ -115,7 +115,7 @@ class AppDatabaseMigrationTests {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .build()
 
         val seen = runBlocking { migrated.aircraftSeenDao().observeAll().first() }
@@ -144,7 +144,7 @@ class AppDatabaseMigrationTests {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .build()
 
         runBlocking {
@@ -161,6 +161,46 @@ class AppDatabaseMigrationTests {
             val visits = migrated.aircraftVisitDao().observeAll().first()
             assertEquals(1, visits.size)
             assertEquals("N123AB", visits.single().registration)
+        }
+        migrated.close()
+    }
+
+    @Test fun `v6 to v7 adds coverage_samples and best_range_record without touching aircraft_visits`() {
+        val legacy = Room.databaseBuilder(context, LegacyV1Database::class.java, dbName).build()
+        val raw = legacy.openHelper.writableDatabase
+        MIGRATION_1_2.migrate(raw)
+        MIGRATION_2_3.migrate(raw)
+        MIGRATION_3_4.migrate(raw)
+        MIGRATION_4_5.migrate(raw)
+        MIGRATION_5_6.migrate(raw)
+        raw.execSQL(
+            "INSERT INTO aircraft_visits (icao, isAirline, firstSeenMs, lastSeenMs, messageCount) " +
+                "VALUES ('AAAAAA', 1, 0, 0, 1)",
+        )
+        legacy.close()
+
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .build()
+
+        runBlocking {
+            // Pre-existing aircraft_visits row survives — v7 only adds two tables.
+            assertEquals(1, migrated.aircraftVisitDao().observeAll().first().size)
+
+            migrated.coverageSampleDao().insertAll(listOf(
+                CoverageSampleEntity(timestampMs = 1_000L, sector = "N", count = 3, maxMi = 42.0, medianSignalDbfs = -12.0),
+            ))
+            val totals = migrated.coverageSampleDao().allTimeBySector()
+            assertEquals(1, totals.size)
+            assertEquals(42.0, totals.single().maxMi, 1e-9)
+
+            migrated.bestRangeDao().upsert(
+                BestRangeRecordEntity(
+                    icao = "AAAAAA", callsign = "TEST1", distanceNm = 150.0,
+                    bearingDeg = 90.0, altitudeFt = 35_000, timestampMs = 2_000L,
+                ),
+            )
+            assertEquals(150.0, migrated.bestRangeDao().get()?.distanceNm ?: 0.0, 1e-9)
         }
         migrated.close()
     }

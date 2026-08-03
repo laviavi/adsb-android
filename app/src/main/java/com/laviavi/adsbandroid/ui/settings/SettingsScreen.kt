@@ -26,6 +26,7 @@ import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.capture.GainOptions
 import com.laviavi.adsbandroid.capture.RtlTcpGain
 import com.laviavi.adsbandroid.location.ObserverMode
+import com.laviavi.adsbandroid.map.BaseMap
 import com.laviavi.adsbandroid.offline.ConfigurableTileDownloader
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -149,10 +150,12 @@ private fun SettingsScreenContent(
                     ObserverSection(config, onConfigChange, onRequestLocationPermission, onUpdateGps)
                     MapRingsSection(config, onConfigChange)
                     PowerSection(config, onConfigChange)
+                    BaseMapSection(config, onConfigChange)
                     OfflineMapsSection(onOpenOfflineMaps)
                     OfflineTileSourceSection(config, onConfigChange)
                     StatsSection(onOpenStats)
                     DataSection(config, onConfigChange)
+                    AboutSection()
                 }
                 SettingsPage.TUNER -> TunerPage(config, gainOptions, onConfigChange)
             }
@@ -559,6 +562,32 @@ private fun OfflineMapsSection(onOpen: () -> Unit) {
             )
             Text("›", style = MaterialTheme.typography.titleMedium, color = AdsbColors.TextSecondary)
         }
+    }
+}
+
+@Composable
+private fun BaseMapSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
+    SettingsSection("Base map", "Which tile source the Map tab renders.") {
+        BaseMap.entries.forEach { map ->
+            OptionRow(
+                label = map.label,
+                description = map.attribution,
+                selected = config.mapBaseMap == map,
+                onClick = { onChange(config.copy(mapBaseMap = map)) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutSection() {
+    SettingsSection("About") {
+        Text(
+            "ADS-B Receiver v${com.laviavi.adsbandroid.BuildConfig.VERSION_NAME} " +
+                "(${com.laviavi.adsbandroid.BuildConfig.VERSION_CODE})",
+            style = MaterialTheme.typography.bodySmall,
+            color = AdsbColors.TextSecondary,
+        )
     }
 }
 

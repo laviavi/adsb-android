@@ -3,18 +3,20 @@
 Living document. Rewritten whenever work lands, so it always describes the code as
 it is now â€” not a dated audit with corrections bolted on.
 
-**Last updated:** 2026-08-03 â€” Live row split into a top strip (identity + data
-block) plus full-width airline/route and type lines (5 lines total); new Aircraft
-Stats screen (Settings â†’ "View aircraft stats") logging every departure to an
-append-only `aircraft_visits` table, grouped by airline vs private aircraft. Phase
-1â€“4 UI models, shared atoms, navigation, Live screen, AircraftRow, AircraftDetailSheet,
+**Last updated:** 2026-08-03 â€” Coverage-history heatmap, best-range-ever, and
+first-time-seen milestone notifications added (Receiver tab + PipelineService);
+a selectable OSM/Esri base map (Settings â†’ Base map); the app version is now shown
+in Settings. Live row split into a top strip (identity + data block) plus
+full-width airline/route and type lines (5 lines total); Aircraft Stats screen
+(Settings â†’ "View aircraft stats") logging every departure to an append-only
+`aircraft_visits` table, grouped by airline vs private aircraft. Phase 1â€“4 UI
+models, shared atoms, navigation, Live screen, AircraftRow, AircraftDetailSheet,
 LogsScreen, ReceiverScreen (viewModel wrapper), SettingsScreen (viewModel wrapper),
-MapScreen (placeholder with marker count) all compiling. PipelineService now exposes
-public `startPipeline()`, `stopPipeline()`, `reconnect()`. TextListScreen deleted
-(replaced by LiveScreen + 5-tab NavigationSuiteScaffold). Version **v1.5.0**
-(`versionCode` 14).
+MapScreen all compiling. PipelineService now exposes public `startPipeline()`,
+`stopPipeline()`, `reconnect()`. TextListScreen deleted (replaced by LiveScreen +
+5-tab NavigationSuiteScaffold). Version **v1.6.0** (`versionCode` 15).
 **Method:** read the source tree and tests; verified by reading files, not recall.
-**Current:** 396 `:core:receiver` + 64 `:app` tests pass. Debug APK builds.
+**Current:** 400 `:core:receiver` + 69 `:app` tests pass. Debug APK builds.
 
 **Parity against the Python reference (`D:\SDR\adsb_v9_5`):**
 
@@ -1434,3 +1436,60 @@ confirmed against a real SQLite engine in `AppDatabaseMigrationTests` (existing
 `aircraft_seen` rows survive v5→v6 untouched, new `aircraft_visits` table is
 immediately usable) — not yet confirmed against the actual on-device database file,
 which has accumulated real migrations v1 through v5 already.
+
+## 28. Coverage history, best range ever, first-time-seen alerts, base map picker, version display (2026-08-03, v1.6.0)
+
+Follow-up to the feature brainstorm against FlightRadar24/ADS-B Exchange/PlaneFinder
+— features that lean into what a *personal* receiver can show that a crowd-network
+app structurally can't, plus a base-map option and a housekeeping ask (show the
+app version somewhere — it was nowhere in the UI before this).
+
+**Coverage history (`coverage_samples` table, DB v6→v7).** `CoverageMetrics.computeRow()`
+already produced an 8-sector row every 5 minutes, but it only ever reached a
+write-only CSV (`CoverageCsvLogger`) or a live 10s-refreshed `StateFlow` — nothing
+persisted it across restarts. Now every non-empty sector from each 5-minute tick is
+also written to `coverage_samples`. New pure function
+`CoverageMetrics.synthesizeAllTimeRow()` (`core/receiver`) aggregates the full
+history back into the same `CoverageMetricsRow` shape the live view already uses —
+**deliberate simplification**: only count/max survive the persisted aggregation, so
+median/p90 collapse to max in the all-time view (documented in the function's doc
+comment, unit-tested). `ReceiverScreen.kt`'s Coverage card gets a LIVE/ALL-TIME
+toggle feeding the *same* `CoveragePolar` composable — no new chart code.
+
+**Best range ever (`best_range_record`, singleton row).** Checked on the same
+5-minute tick (not per-message — a personal best doesn't need per-fix precision,
+and this avoids a DB round-trip on every decoded position), scanning the live
+`AircraftState` list for the longest `distanceNm`. Comparison extracted as a pure
+`isNewBestRange()` (`pipeline/BestRange.kt`), unit-tested. Shown as a line in the
+Coverage card: distance, callsign/ICAO, and when.
+
+**First-time-seen milestone notification.** `AircraftVisitDao.countByIcao()` checked
+in `recordDeparted()` *before* inserting the new visit row — zero means this ICAO
+has never departed before. Posts to a **new** notification channel (`adsb_milestones`,
+`IMPORTANCE_DEFAULT`) — deliberately separate from the existing ongoing foreground
+channel (`adsb_pipeline`, `IMPORTANCE_LOW`, non-dismissible by design), since
+milestones need to actually alert. Scope is deliberately just "first time this ICAO
+ever" — not also "first time this aircraft type," flagged as a fast-follow, not
+built now.
+
+**Base map picker — OSM + Esri, Google explicitly out of scope (Avi's decision).**
+Google Maps tiles can't be pulled through a generic raster tile URL — their ToS
+requires the actual Maps SDK, a separate widget with its own overlay API, needing
+its own API key and every existing overlay (range rings, markers, trails,
+clustering) re-implemented a second time. Not built. OSM and Esri World Imagery
+*are* simple `{z}/{x}/{y}`-style (Esri: `{z}/{y}/{x}`) raster services — new
+`BaseMap` enum (`core/receiver/.../map/BaseMap.kt`, pure, no Android deps), new
+`AppConfig.mapBaseMap` field persisted like every other setting, `MapScreen.kt`
+builds a custom `OnlineTileSourceBase` from the selected template (osmdroid's own
+`XYZTileSource` string-concatenates `z/x/y` and can't fit Esri's swapped order).
+**The dark invert filter is now conditional** — it was unconditionally applied to
+every tile source before this; running it on Esri's satellite photography would
+invert real colors into nonsense, so it's OSM-only now. Settings → Base map shows
+each option's required attribution as its row subtitle.
+
+**Version display.** `buildConfig = true` added to `app/build.gradle.kts`
+(AGP 8+ requires explicit opt-in); Settings gets a new About section reading
+`BuildConfig.VERSION_NAME`/`VERSION_CODE`.
+
+Full suite: 400 core + 69 app tests (9 new: 4 `CoverageMetricsTests.SynthesizeAllTimeRow`
++ 4 `BestRangeTests` + 1 migration test), 0 failures; debug APK builds.

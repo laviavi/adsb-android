@@ -15,8 +15,8 @@ android {
         applicationId = "com.laviavi.adsbandroid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.5.0"
+        versionCode = 15
+        versionName = "1.6.0"
     }
 
     buildTypes {
@@ -37,7 +37,10 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     testOptions {
         unitTests.all { it.useJUnitPlatform() }

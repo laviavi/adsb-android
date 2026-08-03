@@ -3,6 +3,7 @@ package com.laviavi.adsbandroid.pipeline
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -27,6 +28,8 @@ import com.laviavi.adsbandroid.data.AircraftSeenEntity
 import com.laviavi.adsbandroid.data.AircraftHistoryEntity
 import com.laviavi.adsbandroid.data.AircraftVisitDao
 import com.laviavi.adsbandroid.data.AircraftVisitEntity
+import com.laviavi.adsbandroid.data.BestRangeRecordEntity
+import com.laviavi.adsbandroid.data.CoverageSampleEntity
 import com.laviavi.adsbandroid.data.EnrichmentCacheDao
 import com.laviavi.adsbandroid.data.FlightAwareEnrichment
 import com.laviavi.adsbandroid.data.IcaoLookup
@@ -38,10 +41,12 @@ import com.laviavi.adsbandroid.location.GpsPolicy
 import com.laviavi.adsbandroid.location.GpsThrottlePolicy
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.location.ObserverPositionResolver
+import com.laviavi.adsbandroid.observability.CompassSector
 import com.laviavi.adsbandroid.observability.CoverageMetrics
 import com.laviavi.adsbandroid.observability.MessageCounters
 import com.laviavi.adsbandroid.observability.PerformanceMetrics
 import com.laviavi.adsbandroid.observability.PositionedAircraft
+import com.laviavi.adsbandroid.observability.SectorTotal
 import com.laviavi.adsbandroid.pipeline.ErrorLog
 import com.laviavi.adsbandroid.crc.CrcChecker
 import com.laviavi.adsbandroid.crc.IcaoCache
@@ -67,6 +72,8 @@ class PipelineService : Service() {
     @Inject lateinit var historyDao: AircraftHistoryDao
     @Inject lateinit var seenDao: AircraftSeenDao
     @Inject lateinit var visitDao: AircraftVisitDao
+    @Inject lateinit var coverageSampleDao: com.laviavi.adsbandroid.data.CoverageSampleDao
+    @Inject lateinit var bestRangeDao: com.laviavi.adsbandroid.data.BestRangeDao
     @Inject lateinit var enrichmentDao: EnrichmentCacheDao
     @Inject lateinit var aircraftMetaCacheDao: AircraftMetaCacheDao
     @Inject lateinit var offlineMapManager: com.laviavi.adsbandroid.offline.OfflineMapManager
@@ -166,6 +173,13 @@ class PipelineService : Service() {
     /** Live coverage for the Receiver polar. Null until enough positioned aircraft exist. */
     private val _coverage = MutableStateFlow<com.laviavi.adsbandroid.observability.CoverageMetricsRow?>(null)
     val coverage: StateFlow<com.laviavi.adsbandroid.observability.CoverageMetricsRow?> = _coverage.asStateFlow()
+
+    /** Coverage aggregated across every 5-minute tick ever recorded, not just the live window. */
+    private val _allTimeCoverage = MutableStateFlow<com.laviavi.adsbandroid.observability.CoverageMetricsRow?>(null)
+    val allTimeCoverage: StateFlow<com.laviavi.adsbandroid.observability.CoverageMetricsRow?> = _allTimeCoverage.asStateFlow()
+
+    private val _bestRangeEver = MutableStateFlow<BestRangeRecordEntity?>(null)
+    val bestRangeEver: StateFlow<BestRangeRecordEntity?> = _bestRangeEver.asStateFlow()
 
     private val _config = MutableStateFlow(AppConfig())
     val config: StateFlow<AppConfig> = _config.asStateFlow()
@@ -307,6 +321,8 @@ class PipelineService : Service() {
             sessionLock.withLock { startPipelineInternal() }
             requestFreshGpsFix() // "at every app start" - never trust a cached/last-known fix
             refreshGpsCoordinates() // ditto, but persisted as the saved coordinates regardless of mode
+            refreshAllTimeCoverage()
+            _bestRangeEver.value = runCatching { bestRangeDao.get() }.getOrNull()
         }
         serviceScope.launch {
             _sourceState.collect { state ->
@@ -350,7 +366,12 @@ class PipelineService : Service() {
         serviceScope.launch {
             while (true) {
                 delay(CoverageMetrics.INTERVAL_SEC * 1_000L)
-                coverageCsvLogger.tick(currentConfig.observerLatitude, currentConfig.observerLongitude, currentPositionedAircraft())
+                val lat = currentConfig.observerLatitude
+                val lon = currentConfig.observerLongitude
+                val positioned = currentPositionedAircraft()
+                coverageCsvLogger.tick(lat, lon, positioned)
+                recordCoverageSample(positioned)
+                checkBestRange()
             }
         }
         // The Receiver coverage card refreshes far faster than the 5-minute CSV
@@ -381,6 +402,51 @@ class PipelineService : Service() {
         val bearing = ac.bearingDeg
         if (dist == null || bearing == null) null
         else PositionedAircraft(dist, bearing, ac.altitudeFt, ac.signalDbfs)
+    }
+
+    /** Persists this tick's non-empty sectors, then refreshes the all-time view from the full history. */
+    private suspend fun recordCoverageSample(positioned: List<PositionedAircraft>) {
+        val row = CoverageMetrics.computeRow(currentConfig.observerLatitude, currentConfig.observerLongitude, positioned)
+            ?: return
+        val now = System.currentTimeMillis()
+        val samples = row.sectors.filterValues { it.count > 0 }.map { (sector, s) ->
+            CoverageSampleEntity(
+                timestampMs = now, sector = sector.name,
+                count = s.count, maxMi = s.maxMi, medianSignalDbfs = s.medianSignalDbfs,
+            )
+        }
+        if (samples.isEmpty()) return
+        runCatching { coverageSampleDao.insertAll(samples) }
+        refreshAllTimeCoverage()
+    }
+
+    private suspend fun refreshAllTimeCoverage() {
+        val totals = runCatching { coverageSampleDao.allTimeBySector() }.getOrNull() ?: return
+        val sectorTotals = totals.mapNotNull { agg ->
+            runCatching { CompassSector.valueOf(agg.sector) }.getOrNull()?.let { SectorTotal(it, agg.count, agg.maxMi) }
+        }
+        _allTimeCoverage.value = CoverageMetrics.synthesizeAllTimeRow(
+            sectorTotals, currentConfig.observerLatitude, currentConfig.observerLongitude,
+        )
+    }
+
+    /** Not per-message by design — a personal best doesn't need per-fix precision, and this avoids a DB round-trip on every decoded position. */
+    private suspend fun checkBestRange() {
+        val best = receiverRepository.aircraft.value
+            .filter { it.distanceNm != null && it.bearingDeg != null }
+            .maxByOrNull { it.distanceNm!! } ?: return
+        val current = runCatching { bestRangeDao.get() }.getOrNull()
+        if (!isNewBestRange(best.distanceNm!!, current)) return
+        val record = BestRangeRecordEntity(
+            icao = best.icao,
+            callsign = best.callsign?.trim()?.takeIf { it.isNotEmpty() },
+            distanceNm = best.distanceNm!!,
+            bearingDeg = best.bearingDeg!!,
+            altitudeFt = best.altitudeFt,
+            timestampMs = System.currentTimeMillis(),
+        )
+        runCatching { bestRangeDao.upsert(record) }
+        _bestRangeEver.value = record
     }
 
     override fun onDestroy() {
@@ -690,6 +756,7 @@ class PipelineService : Service() {
                 // Independent of aircraft_seen above: one row per departure, never
                 // replaced, so it survives History's Clear and builds a "times seen"
                 // log the Stats screen reads from.
+                val isFirstTime = runCatching { visitDao.countByIcao(s.icao) == 0 }.getOrDefault(false)
                 runCatching {
                     visitDao.insert(AircraftVisitEntity(
                         icao          = s.icao,
@@ -701,6 +768,10 @@ class PipelineService : Service() {
                         lastSeenMs    = s.lastSeenMs,
                         messageCount  = s.messageCount,
                     ))
+                }
+                if (isFirstTime) {
+                    val label = s.callsign?.trim()?.takeIf { it.isNotEmpty() } ?: s.icao
+                    postMilestoneNotification("New aircraft spotted", "$label — first time seen")
                 }
             }
         }
@@ -978,10 +1049,36 @@ class PipelineService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
     }
 
+    /**
+     * Separate channel/id from the ongoing foreground notification above — that one is
+     * IMPORTANCE_LOW and non-dismissible by design; milestones need to actually alert.
+     */
+    private fun postMilestoneNotification(title: String, text: String) {
+        val channelId = "adsb_milestones"
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(channelId, "Aircraft milestones", NotificationManager.IMPORTANCE_DEFAULT),
+        )
+        val contentIntent = PendingIntent.getActivity(
+            this, 0, Intent(this, com.laviavi.adsbandroid.ui.MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        getSystemService(NotificationManager::class.java).notify(
+            NOTIFICATION_ID_MILESTONE,
+            Notification.Builder(this, channelId)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .setContentIntent(contentIntent)
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
     companion object {
         /** Refresh cadence for the Receiver coverage card, independent of the CSV row. */
         private const val COVERAGE_UI_INTERVAL_MS = 10_000L
         private const val NOTIFICATION_ID = 1
+        private const val NOTIFICATION_ID_MILESTONE = 2
         const val NO_DONGLE_MESSAGE = "no dongle found or critical error - check and reconnect the dongle to continue"
 
         /** LIBUSB_ERROR_BUSY: the driver app is holding the dongle and only it can let go. */

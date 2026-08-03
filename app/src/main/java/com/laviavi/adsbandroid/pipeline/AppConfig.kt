@@ -3,6 +3,7 @@ package com.laviavi.adsbandroid.pipeline
 import com.laviavi.adsbandroid.aircraft.AircraftSort
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
+import com.laviavi.adsbandroid.map.BaseMap
 import com.laviavi.adsbandroid.units.DistanceUnit
 
 /**
@@ -87,6 +88,8 @@ data class AppConfig(
     val distanceUnit: DistanceUnit      = DistanceUnit.MILES,
 
     // --- Map layers. Presentation-only; none of these touch the pipeline. ---
+    /** Which tile source the live map renders. Independent of [offlineTileUrlTemplate]. */
+    val mapBaseMap: BaseMap             = BaseMap.OSM,
     val mapShowRangeRings: Boolean      = true,
     val mapShowLabels: Boolean          = true,
     val mapShowGroundTraffic: Boolean   = true,

@@ -99,6 +99,55 @@ data class AircraftVisitEntity(
 
     @Query("SELECT * FROM aircraft_visits ORDER BY firstSeenMs DESC")
     fun observeAll(): Flow<List<AircraftVisitEntity>>
+
+    /** Zero means this departure is the first time this ICAO has ever been recorded. */
+    @Query("SELECT COUNT(*) FROM aircraft_visits WHERE icao = :icao")
+    suspend fun countByIcao(icao: String): Int
+}
+
+/**
+ * One row per compass sector per 5-minute coverage tick, written only when that
+ * sector actually saw traffic — the durable counterpart to [CoverageCsvLogger]'s
+ * write-only CSV. Powers the Receiver tab's "all-time" coverage view.
+ */
+@Entity(tableName = "coverage_samples", indices = [Index("sector")])
+data class CoverageSampleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestampMs: Long,
+    val sector: String,
+    val count: Int,
+    val maxMi: Double,
+    val medianSignalDbfs: Double?,
+)
+
+data class SectorAggregate(val sector: String, val count: Int, val maxMi: Double)
+
+@Dao interface CoverageSampleDao {
+    @Insert
+    suspend fun insertAll(samples: List<CoverageSampleEntity>)
+
+    @Query("SELECT sector, SUM(count) as count, MAX(maxMi) as maxMi FROM coverage_samples GROUP BY sector")
+    suspend fun allTimeBySector(): List<SectorAggregate>
+}
+
+/** Singleton row (id always 0) holding the single furthest contact ever decoded. */
+@Entity(tableName = "best_range_record")
+data class BestRangeRecordEntity(
+    @PrimaryKey val id: Int = 0,
+    val icao: String,
+    val callsign: String?,
+    val distanceNm: Double,
+    val bearingDeg: Double,
+    val altitudeFt: Int?,
+    val timestampMs: Long,
+)
+
+@Dao interface BestRangeDao {
+    @Query("SELECT * FROM best_range_record WHERE id = 0")
+    suspend fun get(): BestRangeRecordEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(record: BestRangeRecordEntity)
 }
 
 @Entity(tableName = "enrichment_cache")
@@ -142,8 +191,10 @@ data class AircraftMetaCacheEntity(
         EnrichmentCacheEntity::class,
         AircraftMetaCacheEntity::class,
         AircraftVisitEntity::class,
+        CoverageSampleEntity::class,
+        BestRangeRecordEntity::class,
     ],
-    version = 6,
+    version = 7,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftHistoryDao(): AircraftHistoryDao
@@ -151,6 +202,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun enrichmentCacheDao(): EnrichmentCacheDao
     abstract fun aircraftMetaCacheDao(): AircraftMetaCacheDao
     abstract fun aircraftVisitDao(): AircraftVisitDao
+    abstract fun coverageSampleDao(): CoverageSampleDao
+    abstract fun bestRangeDao(): BestRangeDao
 }
 
 /**
@@ -253,6 +306,38 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
             """.trimIndent(),
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_aircraft_visits_icao` ON `aircraft_visits` (`icao`)")
+    }
+}
+
+/** v6 -> v7: added `coverage_samples` (durable coverage history) and `best_range_record` (personal-best contact). */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `coverage_samples` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `timestampMs` INTEGER NOT NULL,
+                `sector` TEXT NOT NULL,
+                `count` INTEGER NOT NULL,
+                `maxMi` REAL NOT NULL,
+                `medianSignalDbfs` REAL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_coverage_samples_sector` ON `coverage_samples` (`sector`)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `best_range_record` (
+                `id` INTEGER NOT NULL PRIMARY KEY,
+                `icao` TEXT NOT NULL,
+                `callsign` TEXT,
+                `distanceNm` REAL NOT NULL,
+                `bearingDeg` REAL NOT NULL,
+                `altitudeFt` INTEGER,
+                `timestampMs` INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
     }
 }
 
