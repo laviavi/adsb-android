@@ -47,19 +47,32 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Overlay
 
 /**
- * Builds a live tile source from a [BaseMap]'s `{z}/{x}/{y}`-style template — the
- * same placeholder convention `offline/OsmTileDownloader.kt` uses for downloads,
+ * Builds a live tile source from a `{z}/{x}/{y}`-style template — the same
+ * placeholder convention `offline/OsmTileDownloader.kt` uses for downloads,
  * adapted here to osmdroid's own tile-loading interface since the base map can
  * change while the screen is open (unlike `TileSourceFactory.MAPNIK`, a fixed
  * singleton with no template to swap).
  */
-private fun buildTileSource(baseMap: BaseMap): ITileSource =
-    object : OnlineTileSourceBase(baseMap.name, 0, 19, 256, "", arrayOf(baseMap.urlTemplate)) {
-        override fun getTileURLString(pMapTileIndex: Long): String = baseMap.urlTemplate
+private fun buildTileSource(name: String, urlTemplate: String): ITileSource =
+    object : OnlineTileSourceBase(name, 0, 19, 256, "", arrayOf(urlTemplate)) {
+        override fun getTileURLString(pMapTileIndex: Long): String = urlTemplate
             .replace("{z}", MapTileIndex.getZoom(pMapTileIndex).toString())
             .replace("{x}", MapTileIndex.getX(pMapTileIndex).toString())
             .replace("{y}", MapTileIndex.getY(pMapTileIndex).toString())
     }
+
+private fun buildTileSource(baseMap: BaseMap): ITileSource = buildTileSource(baseMap.name, baseMap.urlTemplate)
+
+/** The transparent labels/boundaries overlay for [BaseMap.labelUrlTemplate], or null when the base map has none. */
+private fun buildLabelOverlay(context: android.content.Context, baseMap: BaseMap): org.osmdroid.views.overlay.TilesOverlay? {
+    val template = baseMap.labelUrlTemplate ?: return null
+    val source = buildTileSource("${baseMap.name}Labels", template)
+    val provider = org.osmdroid.tileprovider.MapTileProviderBasic(context, source)
+    return org.osmdroid.views.overlay.TilesOverlay(provider, context).apply {
+        loadingBackgroundColor = android.graphics.Color.TRANSPARENT
+        loadingLineColor = android.graphics.Color.TRANSPARENT
+    }
+}
 
 /**
  * Zoom steps a named range scale rather than free zoom levels: the operator thinks
@@ -140,6 +153,7 @@ fun MapScreen(
         }
     }
     val overlay = remember { AircraftOverlay(density) }
+    var labelOverlay by remember { mutableStateOf<org.osmdroid.views.overlay.TilesOverlay?>(null) }
 
     DisposableEffect(Unit) {
         onDispose { mapView.onDetach() }
@@ -159,6 +173,11 @@ fun MapScreen(
     LaunchedEffect(config.mapBaseMap) {
         mapView.setTileSource(buildTileSource(config.mapBaseMap))
         mapView.overlayManager.tilesOverlay.setColorFilter(tileFilterFor(config.mapBaseMap))
+        // Esri's imagery carries no place names — its labels overlay is a second,
+        // transparent tile layer drawn on top; inserted at index 0 so it always sits
+        // below the aircraft markers, added later in a separate effect below.
+        labelOverlay?.let { mapView.overlays.remove(it) }
+        labelOverlay = buildLabelOverlay(context, config.mapBaseMap)?.also { mapView.overlays.add(0, it) }
         mapView.invalidate()
     }
 

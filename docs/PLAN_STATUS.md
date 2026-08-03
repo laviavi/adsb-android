@@ -1518,3 +1518,43 @@ Not yet confirmed on-device — diagnosed and fixed from Avi's description (Esri
 "grayscale/inverted, same as OSM") plus reading fetched OSM/Esri sample tiles
 directly (both render normally/colorfully outside the app, confirming the bug was
 in the app's filter application, not the tile sources themselves).
+
+**Process note:** the v1.6.1 release APK was built *before* the version bump
+landed in `build.gradle.kts`, so the shipped binary had the fix but reported
+"1.6.0 (15)" in Settings → About. Caught by Avi after install. Going forward:
+bump the version first, build second, always — never the reverse.
+
+## 30. GPS-on-start fix + Esri place labels (2026-08-03, v1.6.2)
+
+**GPS root cause found.** `PipelineService.refreshGpsCoordinates()` already ran
+at every app start "independent of Fixed/Follow-GPS mode" (per its own doc
+comment, from an earlier session) — but it silently no-ops without
+`ACCESS_FINE_LOCATION`. That permission was only ever requested from Settings →
+Observer position → "Follow GPS" (`SettingsScreen.kt`'s `onClick` on that
+`OptionRow`). A user who stayed on the default **Fixed** mode — never touching
+that toggle — never saw the permission prompt at all, so the "fresh GPS every
+launch" behavior silently failed forever, regardless of mode. This is why the
+map kept centering on the leftover Southern-California default coordinates for
+an operator in Canada.
+
+**Fix:** `MainActivity.kt`'s `AdsbScaffold` now requests `ACCESS_FINE_LOCATION`
+unconditionally in a `LaunchedEffect(Unit)` — fires once per app start,
+independent of any Settings interaction. Re-requesting an already-granted
+permission is a documented no-op (callback fires immediately, no dialog), so
+this is safe on every launch. The grant callback also calls `onUpdateGps {}`
+directly, so the very launch that first grants permission still gets its fix
+immediately rather than waiting for the next restart.
+
+**Esri place labels.** Confirmed the root complaint ("no cities, streets") was
+inherent to Esri's World Imagery layer — pure satellite photography, genuinely
+no label data. Fixed by adding `BaseMap.labelUrlTemplate` (Esri's
+`Reference/World_Boundaries_and_Places` service, a transparent-background tile
+layer of place names/boundaries) and rendering it as a second `TilesOverlay` in
+`MapScreen.kt`, inserted at index 0 of `mapView.overlays` so it always sits
+above the base imagery but below the aircraft markers. Verified the reference
+tile service actually returns labeled transparent PNGs before wiring it in, not
+assumed. OSM is unaffected — its own tiles already carry labels, so
+`labelUrlTemplate` is null for it.
+
+Full suite: 400 core + 69 app tests, 0 failures; debug APK builds. Version
+bumped to v1.6.2 *before* this build, per the process note above.

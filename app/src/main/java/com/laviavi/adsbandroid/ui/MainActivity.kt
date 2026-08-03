@@ -155,10 +155,21 @@ private fun AdsbScaffold(
     // Detail sheet state
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
-    // Requests ACCESS_FINE_LOCATION; result isn't consumed here because the
-    // Settings screens already re-read the grant state on every recomposition.
+    // Requests ACCESS_FINE_LOCATION automatically on every app start, then triggers
+    // a fresh GPS fix once granted. Previously this was only ever requested from
+    // Settings' "Follow GPS" toggle — a user who stayed on Fixed mode (the default)
+    // never saw the prompt, so PipelineService's own "fresh GPS fix on every app
+    // start, independent of Fixed/Follow-GPS mode" logic (refreshGpsCoordinates)
+    // silently no-opped forever for lack of permission. Re-requesting an
+    // already-granted permission is a no-op that fires the callback immediately
+    // with no dialog shown, so this is safe to run on every launch.
     val locationPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) onUpdateGps {}
+        }
+    LaunchedEffect(Unit) {
+        locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
 
     NavigationSuiteScaffold(
         navigationSuiteItems = {
