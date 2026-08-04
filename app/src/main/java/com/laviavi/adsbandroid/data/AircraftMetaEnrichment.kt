@@ -26,7 +26,21 @@ private const val TAG = "AircraftMetaEnrich"
  */
 private fun String?.present(): String? =
     this?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-private const val CACHE_TTL_MS = 30 * 24 * 3600 * 1000L
+
+/**
+ * Was 30 days. A negative result (all three sources returned nothing — a
+ * transient outage, not necessarily "this aircraft has no data") used to stay
+ * cached for a month with no way to force a recheck. Real case: ICAO C05737
+ * (a Canadian Harbour Air DHC-3 Turbo Otter, registration C-GHAS) got cached
+ * as "none" while hexdb.io was erroring and OpenSky's metadata endpoint was
+ * down — even though adsbdb has full data for it. 2 hours lets a transient
+ * failure retry the same session instead of waiting a month.
+ */
+private const val CACHE_TTL_MS = 2 * 3600 * 1000L
+
+/** True when a cached lookup is still fresh enough to skip a new network fetch. */
+internal fun isCacheFresh(cachedAtMs: Long, nowMs: Long, ttlMs: Long = CACHE_TTL_MS): Boolean =
+    nowMs - cachedAtMs < ttlMs
 
 data class AircraftMeta(
     val icao: String,
@@ -107,12 +121,10 @@ class AircraftMetaEnrichment(
         val key = icao.uppercase().trim()
         if (key.isEmpty()) return null
 
-        // Check 30-day cache
         val cached = cacheDao.get(key)
-        if (cached != null && System.currentTimeMillis() - cached.cachedAtMs < CACHE_TTL_MS) {
+        if (cached != null && isCacheFresh(cached.cachedAtMs, System.currentTimeMillis())) {
             return if (cached.source == "none") null
-            // Also guarded on read: rows cached before this fix still hold "Null",
-            // and the cache lives for 30 days.
+            // Also guarded on read: rows cached before this fix still hold "Null".
             else AircraftMeta(key, cached.registration.present(), cached.manufacturer.present(),
                 cached.model.present(), cached.typeCode.present(), cached.owner.present(), cached.source)
         }

@@ -1558,3 +1558,37 @@ assumed. OSM is unaffected — its own tiles already carry labels, so
 
 Full suite: 400 core + 69 app tests, 0 failures; debug APK builds. Version
 bumped to v1.6.2 *before* this build, per the process note above.
+
+## 31. Meta-enrichment negative-cache TTL: 30 days → 2 hours (2026-08-04, v1.6.3)
+
+Direct follow-up to §30's diagnosis, confirmed live against ICAO **C05737**
+(Canadian Harbour Air DHC-3 Turbo Otter, registration **C-GHAS**) — real
+evidence, not a hypothetical: at diagnosis time, `hexdb.io` was returning 504
+and OpenSky's metadata endpoint turned out to be permanently retired (410
+Gone, dead for every non-US lookup, not just this one), so the very first
+lookup for this aircraft got all three sources fail and cached a "none"
+result. **adsbdb had (and has) the full record the whole time** — verified
+live: `registration: "C-GHAS", type: "DHC-3 Otter (Turbo)", operator: "Harbour
+Air"`. Under the old 30-day TTL, that negative result would have blocked any
+retry for a month regardless of the data being available.
+
+**Fix:** `AircraftMetaEnrichment.kt`'s `CACHE_TTL_MS` changed from
+`30 * 24 * 3600 * 1000L` to `2 * 3600 * 1000L`. The inline freshness check was
+extracted into a standalone `isCacheFresh(cachedAtMs, nowMs, ttlMs)` function
+(`internal`, file-scoped, no dependency on the class's DAO/HTTP client) so it's
+directly unit-testable without mocking network or Room.
+
+**Tests** (`AircraftMetaEnrichmentTests.kt`, new) use C05737's own timeline as
+the scenario: a lookup cached 3 hours ago is stale under the new 2h rule and
+must retry (matching what actually happened to this aircraft), while the same
+3-hour-old entry is shown to have incorrectly stayed "fresh" under the old
+30-day constant — a direct regression test for the exact bug found.
+
+**Known related issue, not fixed here** (out of scope for this change,
+flagged for a future pass if wanted): OpenSky's aircraft-metadata endpoint
+being permanently gone (410) means `lookupIntl()`'s middle step now always
+fails for every non-US ICAO — it still gets attempted (and its request
+timeout eaten) before falling through to adsbdb, on every non-cached lookup.
+
+Full suite: 400 core + 73 app tests (4 new `AircraftMetaEnrichmentTests`), 0
+failures; debug APK builds. Version bumped to v1.6.3 before this build.
