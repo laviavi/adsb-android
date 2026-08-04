@@ -1009,9 +1009,16 @@ class PipelineService : Service() {
 
     private fun maybeEnrichFa(state: AircraftState) {
         if (!currentConfig.networkEnrichmentAllowed) return
+        // Bare ICAO as a last resort — mostly relevant for non-US aircraft, since a
+        // US aircraft already has its registration from the offline algorithm
+        // (Registration.fromIcao) with no network round trip needed. FlightAware
+        // usually has no data indexed under a raw Mode S hex, but attempting it
+        // costs nothing extra: FlightAwareEnrichment's own caching/throttling
+        // (4s initial delay, 30s retry) already governs how often this is tried,
+        // same as any other ident that keeps failing.
         val ident = state.callsign?.trim()?.takeIf { it.isNotEmpty() }
             ?: state.registration?.trim()?.takeIf { it.isNotEmpty() }
-            ?: return
+            ?: state.icao
         flightAwareEnrichment.maybeSchedule(state.icao, ident) { fa ->
             serviceScope.launch {
                 val route = when {

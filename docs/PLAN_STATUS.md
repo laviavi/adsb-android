@@ -1592,3 +1592,51 @@ timeout eaten) before falling through to adsbdb, on every non-cached lookup.
 
 Full suite: 400 core + 73 app tests (4 new `AircraftMetaEnrichmentTests`), 0
 failures; debug APK builds. Version bumped to v1.6.3 before this build.
+
+## 32. FA enrichment: drop the airborne-only filter, add an ICAO-hex ident fallback (2026-08-04, v1.6.4)
+
+Two explicit follow-ups to §31's diagnosis:
+
+**1. `FlightAwareEnrichment`'s `parse()` no longer requires `flightStatus ==
+"airborne"`.** It previously discarded any flight whose FlightAware status
+wasn't exactly "airborne" — for a short hop (a 20-30 min seaplane leg is the
+real case that surfaced this) most retry attempts (every 30s, per
+`FA_RETRY_INTERVAL`) land while the flight shows "arrived" or hasn't departed
+yet, and got silently thrown away even though FlightAware genuinely had the
+data. Now any entry with a non-blank `flightStatus` counts — still excludes
+FlightAware's `"unknown": true` not-found placeholder (which has no
+`flightStatus` field at all), so an unresolvable ident still correctly returns
+`null` rather than a false empty-but-cached "result" that would wrongly stop
+future retries.
+
+**2. `PipelineService.maybeEnrichFa()` now falls back to the bare ICAO hex**
+when neither callsign nor registration is available, instead of skipping the
+FlightAware lookup entirely. Mostly matters for non-US aircraft — a US
+aircraft already has its registration for free from the offline algorithm
+(`Registration.fromIcao`), so this case was effectively non-US-only in
+practice already; made explicit rather than silently relying on that
+coincidence. **Verified live that this specific fallback does not resolve
+real data for C05737** (`flightaware.com/live/flight/C05737` → "FlightAware
+couldn't find flight tracking data... just yet") — FlightAware doesn't index
+by raw Mode S address. Kept anyway since it may work for other aircraft, costs
+nothing beyond the existing 30s retry throttle, and removes an artificial gap
+where an aircraft with only an ICAO got zero enrichment attempts from any
+source.
+
+**Refactor for testability:** `parse()`, `titleCase()`, `cleanAirlineName()`
+moved from private instance methods to top-level functions in the same file
+(`parse` marked `internal`) — none touched instance state, so this makes
+`parse()` callable directly from a test with just an HTML string, no
+`FlightAwareEnrichment` instance or `CoroutineScope` needed. Also dropped a
+`Log.d` call on the "not found" path once tests exercised it: `android.util.Log`
+isn't available in a plain JVM unit test (no Robolectric here), and the debug
+log wasn't worth pulling in Robolectric for.
+
+**Tests** (`FlightAwareEnrichmentTests.kt`, new, 5 tests) use CGHAS/C05737's
+real page structure as fixtures: an "airborne" flight still parses, an
+"arrived" flight now parses too (the actual fix), FlightAware's "unknown"
+not-found placeholder correctly yields no result, and a real flight is found
+even when an unknown placeholder precedes it in the flights map.
+
+Full suite: 400 core + 78 app tests (5 new `FlightAwareEnrichmentTests`), 0
+failures; debug APK builds. Version bumped to v1.6.4 before this build.

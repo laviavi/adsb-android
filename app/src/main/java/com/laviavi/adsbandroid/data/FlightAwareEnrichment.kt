@@ -105,62 +105,72 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
                 append(HttpHeaders.AcceptLanguage, "en-US,en;q=0.9")
             }
         }.bodyAsText()
-        parse(html, ident)
+        parse(html)
     }.getOrElse {
         Log.d(TAG, "FA fetch error for $ident: $it")
         null
     }
 
-    private fun parse(html: String, ident: String): FaResult? {
-        val marker = "trackpollBootstrap = "
-        val start = html.indexOf(marker).takeIf { it >= 0 } ?: return null
-        val tail = html.substring(start + marker.length)
-        val end = tail.indexOf("</script>").takeIf { it >= 0 } ?: return null
-        val block = tail.substring(0, end).trim().trimEnd(';').trim()
+}
 
-        val data = runCatching { json.parseToJsonElement(block).jsonObject }.getOrNull() ?: return null
-        val flights = data["flights"]?.jsonObject ?: return null
-        val airborne = flights.values.firstOrNull {
-            (it.jsonObject["flightStatus"]?.jsonPrimitive?.content ?: "").lowercase() == "airborne"
-        }?.jsonObject ?: run {
-            Log.d(TAG, "FA: no airborne flight for $ident")
-            return null
-        }
+/**
+ * Picks any flight FlightAware has real tracking data for — previously required
+ * `flightStatus == "airborne"` specifically, which meant a short-hop flight (e.g.
+ * a 20-30 min seaplane leg) that had already landed by the time a retry landed
+ * was silently discarded even though FlightAware had it (as "arrived"). Any
+ * status counts now — "airborne", "arrived", "scheduled", whatever FlightAware
+ * reports — as long as the entry is a genuine tracked flight, not the
+ * `"unknown": true` placeholder FlightAware returns for an ident it has no data
+ * for at all (which has no `flightStatus` field, so the blank check excludes it —
+ * returning that as an empty-but-non-null [FaResult] would wrongly mark the ident
+ * "resolved" in [FlightAwareEnrichment]'s cache and stop it from ever retrying).
+ */
+internal fun parse(html: String): FaResult? {
+    val marker = "trackpollBootstrap = "
+    val start = html.indexOf(marker).takeIf { it >= 0 } ?: return null
+    val tail = html.substring(start + marker.length)
+    val end = tail.indexOf("</script>").takeIf { it >= 0 } ?: return null
+    val block = tail.substring(0, end).trim().trimEnd(';').trim()
 
-        val origin      = airborne["origin"]?.jsonObject?.get("iata")?.jsonPrimitive?.content?.trim() ?: ""
-        val destination = airborne["destination"]?.jsonObject?.get("iata")?.jsonPrimitive?.content?.trim() ?: ""
-        val callsign    = airborne["displayIdent"]?.jsonPrimitive?.content?.trim() ?: ""
+    val data = runCatching { json.parseToJsonElement(block).jsonObject }.getOrNull() ?: return null
+    val flights = data["flights"]?.jsonObject ?: return null
+    val flight = flights.values.firstOrNull {
+        (it.jsonObject["flightStatus"]?.jsonPrimitive?.content ?: "").isNotBlank()
+    }?.jsonObject ?: return null
 
-        val airline     = airborne["airline"]?.jsonObject
-        val airlineName = cleanAirlineName(airline?.get("fullName")?.jsonPrimitive?.content)
-        val airlineIcao = airline?.get("icao")?.jsonPrimitive?.content?.trim()?.uppercase() ?: ""
+    val origin      = flight["origin"]?.jsonObject?.get("iata")?.jsonPrimitive?.content?.trim() ?: ""
+    val destination = flight["destination"]?.jsonObject?.get("iata")?.jsonPrimitive?.content?.trim() ?: ""
+    val callsign    = flight["displayIdent"]?.jsonPrimitive?.content?.trim() ?: ""
 
-        val aircraft    = airborne["aircraft"]?.jsonObject
-        val typeCode    = aircraft?.get("type")?.jsonPrimitive?.content?.trim()?.uppercase() ?: ""
-        val typeDetails = aircraft?.get("typeDetails")?.jsonObject
-        val manufacturer = titleCase(typeDetails?.get("manufacturer")?.jsonPrimitive?.content)
-        val model        = titleCase(typeDetails?.get("model")?.jsonPrimitive?.content)
+    val airline     = flight["airline"]?.jsonObject
+    val airlineName = cleanAirlineName(airline?.get("fullName")?.jsonPrimitive?.content)
+    val airlineIcao = airline?.get("icao")?.jsonPrimitive?.content?.trim()?.uppercase() ?: ""
 
-        return FaResult(origin, destination, airlineName, airlineIcao, callsign, typeCode, manufacturer, model)
+    val aircraft    = flight["aircraft"]?.jsonObject
+    val typeCode    = aircraft?.get("type")?.jsonPrimitive?.content?.trim()?.uppercase() ?: ""
+    val typeDetails = aircraft?.get("typeDetails")?.jsonObject
+    val manufacturer = titleCase(typeDetails?.get("manufacturer")?.jsonPrimitive?.content)
+    val model        = titleCase(typeDetails?.get("model")?.jsonPrimitive?.content)
+
+    return FaResult(origin, destination, airlineName, airlineIcao, callsign, typeCode, manufacturer, model)
+}
+
+private fun titleCase(s: String?): String {
+    if (s.isNullOrBlank()) return ""
+    return s.trim().split(" ").joinToString(" ") { w ->
+        w.lowercase().replaceFirstChar { it.uppercaseChar() }
     }
+}
 
-    private fun titleCase(s: String?): String {
-        if (s.isNullOrBlank()) return ""
-        return s.trim().split(" ").joinToString(" ") { w ->
-            w.lowercase().replaceFirstChar { it.uppercaseChar() }
+private fun cleanAirlineName(name: String?): String {
+    if (name.isNullOrBlank()) return ""
+    var cleaned = titleCase(name)
+    val low = cleaned.lowercase()
+    for (suffix in CORP_SUFFIXES) {
+        if (low.endsWith(suffix)) {
+            cleaned = cleaned.dropLast(suffix.length).trimEnd().trimEnd(',')
+            break
         }
     }
-
-    private fun cleanAirlineName(name: String?): String {
-        if (name.isNullOrBlank()) return ""
-        var cleaned = titleCase(name)
-        val low = cleaned.lowercase()
-        for (suffix in CORP_SUFFIXES) {
-            if (low.endsWith(suffix)) {
-                cleaned = cleaned.dropLast(suffix.length).trimEnd().trimEnd(',')
-                break
-            }
-        }
-        return cleaned
-    }
+    return cleaned
 }
