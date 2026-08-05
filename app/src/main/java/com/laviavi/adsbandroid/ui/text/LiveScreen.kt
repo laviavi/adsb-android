@@ -44,103 +44,134 @@ import com.laviavi.adsbandroid.ui.model.*
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 
+/**
+ * Top bar (tuner chip, title, Start/Stop, overflow) — the "live start section".
+ * Split out of the old monolithic `LiveScreen` so [TrafficScreen] can place the
+ * Live/History/Stats tab row underneath it, above the rest of Live's content.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LiveScreen(
+fun LiveTopBar(
+    receiverStatus: ReceiverStatusUi,
+    sourceState: SourceState,
+    onNavigateToReceiver: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onReconnect: () -> Unit,
+    onResetCounters: () -> Unit,
+) {
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    var showStopConfirm by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(horizontal = AdsbDimens.ScreenGutter),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Tuner chip
+        Surface(
+            modifier = Modifier.clickable(onClick = onNavigateToReceiver),
+            color = AdsbColors.SurfaceElevated,
+            shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
+            border = androidx.compose.foundation.BorderStroke(1.dp, AdsbColors.Outline),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(Icons.Outlined.Usb, contentDescription = null, modifier = Modifier.size(14.dp), tint = AdsbColors.Primary)
+                Text(
+                    text = receiverStatus.sourceName ?: "NO SDR",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = AdsbColors.Primary,
+                )
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Text("Live", fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
+
+        Spacer(Modifier.weight(1f))
+
+        // Start/Stop button
+        val isRunning = sourceState is SourceState.Running
+        Button(
+            onClick = { if (isRunning) showStopConfirm = true else onStart() },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AdsbColors.Primary,
+                contentColor = AdsbColors.OnPrimary,
+            ),
+            shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.height(32.dp),
+        ) {
+            Text(
+                text = if (isRunning) "STOP" else "START",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.W700,
+                letterSpacing = 0.96.sp,
+            )
+        }
+
+        // Overflow
+        Box {
+            IconButton(onClick = { showOverflowMenu = true }) {
+                Icon(Icons.Default.MoreVert, "More options", tint = AdsbColors.TextSecondary)
+            }
+            DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
+                DropdownMenuItem(text = { Text("Reconnect source") }, onClick = { showOverflowMenu = false; onReconnect() })
+                DropdownMenuItem(
+                    text = { Text("Reset counters") },
+                    onClick = { showOverflowMenu = false; onResetCounters() },
+                )
+            }
+        }
+    }
+
+    // Stop confirmation
+    if (showStopConfirm) {
+        AlertDialog(
+            onDismissRequest = { showStopConfirm = false },
+            title = { Text("Stop receiving?") },
+            text = { Text("The session and its counters end.") },
+            confirmButton = {
+                TextButton(onClick = { showStopConfirm = false; onStop() }) { Text("Stop") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStopConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/**
+ * Everything below the top bar: metrics header, filter chips, sort bar, and
+ * the aircraft list or non-nominal state. The Live tab's content inside
+ * [TrafficScreen]'s pager.
+ */
+@Composable
+fun LiveBody(
     viewModel: MainViewModel,
     onAircraftClick: (String) -> Unit,
     onNavigateToReceiver: () -> Unit,
     onShowOnMap: (String) -> Unit,
     onConfigChange: (AppConfig) -> Unit,
     onStart: () -> Unit,
-    onStop: () -> Unit,
-    onReconnect: () -> Unit,
-    onResetCounters: () -> Unit,
+    sourceState: SourceState,
 ) {
     val rows by viewModel.aircraftRows.collectAsStateWithLifecycle()
     val trackedCount by viewModel.trackedCount.collectAsStateWithLifecycle()
     val metrics by viewModel.liveMetrics.collectAsStateWithLifecycle()
-    val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
-    val receiverStatus by viewModel.receiverStatus.collectAsStateWithLifecycle()
     val metricsCollapsed by viewModel.metricsCollapsed.collectAsStateWithLifecycle()
     val filters by viewModel.liveFilters.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
 
-    var showOverflowMenu by remember { mutableStateOf(false) }
-    var showStopConfirm by remember { mutableStateOf(false) }
-
     Column(modifier = Modifier.fillMaxSize().background(AdsbColors.Background)) {
-        // App bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = AdsbDimens.ScreenGutter),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Tuner chip
-            Surface(
-                modifier = Modifier.clickable(onClick = onNavigateToReceiver),
-                color = AdsbColors.SurfaceElevated,
-                shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AdsbColors.Outline),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Outlined.Usb, contentDescription = null, modifier = Modifier.size(14.dp), tint = AdsbColors.Primary)
-                    Text(
-                        text = receiverStatus.sourceName ?: "NO SDR",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = AdsbColors.Primary,
-                    )
-                }
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            Text("Live", fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
-
-            Spacer(Modifier.weight(1f))
-
-            // Start/Stop button
-            val isRunning = sourceState is SourceState.Running
-            Button(
-                onClick = { if (isRunning) showStopConfirm = true else onStart() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AdsbColors.Primary,
-                    contentColor = AdsbColors.OnPrimary,
-                ),
-                shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                modifier = Modifier.height(32.dp),
-            ) {
-                Text(
-                    text = if (isRunning) "STOP" else "START",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.W700,
-                    letterSpacing = 0.96.sp,
-                )
-            }
-
-            // Overflow
-            Box {
-                IconButton(onClick = { showOverflowMenu = true }) {
-                    Icon(Icons.Default.MoreVert, "More options", tint = AdsbColors.TextSecondary)
-                }
-                DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
-                    DropdownMenuItem(text = { Text("Reconnect source") }, onClick = { showOverflowMenu = false; onReconnect() })
-                    DropdownMenuItem(
-                        text = { Text("Reset counters") },
-                        onClick = { showOverflowMenu = false; onResetCounters() },
-                    )
-                }
-            }
-        }
-
         // Metrics header. The chevron sits outside the collapsing region so it is
         // still reachable once collapsed — a toggle that hides itself is a trap.
         if (sourceState is SourceState.Running) {
@@ -245,21 +276,6 @@ fun LiveScreen(
                 }
             }
         }
-    }
-
-    // Stop confirmation
-    if (showStopConfirm) {
-        AlertDialog(
-            onDismissRequest = { showStopConfirm = false },
-            title = { Text("Stop receiving?") },
-            text = { Text("The session and its counters end.") },
-            confirmButton = {
-                TextButton(onClick = { showStopConfirm = false; onStop() }) { Text("Stop") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showStopConfirm = false }) { Text("Cancel") }
-            },
-        )
     }
 }
 

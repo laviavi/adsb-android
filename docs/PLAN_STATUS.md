@@ -13,8 +13,10 @@ History's content and behaviour are unchanged. The Live tab's "max range mi"
 metric is now a running per-session max (survives an aircraft leaving range;
 resets only on app start, Start-button, reconnect, or dongle replug — never on
 a manual "Reset counters") instead of an instantaneous max over the currently
-tracked list; its label is now "Max Range(miles)". Version **v1.6.5**
-(`versionCode` 20).
+tracked list; its label is now "Max Range(miles)". The Live/History/Stats tab
+row sits between Live's top bar and its filter chips, and the three sub-tabs
+are swipeable via `HorizontalPager`, not just tap-to-switch. Version
+**v1.6.5** (`versionCode` 20).
 
 Coverage-history heatmap, best-range-ever, and first-time-seen milestone
 notifications added (Receiver tab + PipelineService); a selectable OSM/Esri
@@ -1732,3 +1734,29 @@ Changed to track a running max for the whole receiver session instead:
 Full suite: 400 core + 78 app tests, 0 failures (no existing test asserted the
 old instantaneous-max behavior); debug APK builds. Still v1.6.5/`versionCode`
 20 — bundled into the same not-yet-released build as §33's nav change.
+
+**Also folded into v1.6.5 — Traffic tab layout: tabs moved below the app bar, swipeable.**
+Avi's follow-up on §33: the Live/History/Stats tab row was sitting above
+everything, including Live's own top bar. Moved it to sit between that top
+bar (tuner chip/title/Start-Stop/overflow — "the live start section", which
+applies regardless of which sub-tab is open, so it stays fixed) and the
+Airborne/On ground/Position/etc. filter chips, which are Live-only. Also
+added horizontal swipe between the three sub-tabs, not just tapping the tab
+row.
+
+- **`ui/text/LiveScreen.kt`** split in two — nothing else about either half
+  changed: **`LiveTopBar`** (tuner chip, "Live" title, Start/Stop button +
+  its stop-confirm dialog, overflow menu) and **`LiveBody`** (metrics header,
+  `FilterChipRow`, sort bar, aircraft list/non-nominal state). The old
+  monolithic `LiveScreen` composable is gone — `TrafficScreen` is its only
+  caller and now calls the two halves separately with the tab row and pager
+  sandwiched between them.
+- **`ui/text/TrafficScreen.kt`** rewritten: `LiveTopBar` first, then a
+  `TabRow` driven by a `HorizontalPager`'s `pagerState.currentPage` (standard
+  Compose tab+pager sync — tapping a tab calls
+  `pagerState.animateScrollToPage()`, swiping the pager updates the tab
+  selection automatically), then the pager itself with `LiveBody` /
+  `HistoryScreen` / `StatsScreen` as its three pages.
+
+Full suite: 400 core + 78 app tests, 0 failures; debug APK builds. Still
+v1.6.5/`versionCode` 20.
