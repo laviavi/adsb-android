@@ -117,19 +117,25 @@ object UiMapper {
         )
     }
 
+    /**
+     * [sessionMaxRangeNm] is the running max for the current receiver session
+     * (survives an aircraft leaving range; resets only on app start or a
+     * dongle reconnect — see `PipelineService.clearSessionState()`), not an
+     * instantaneous max over [aircraft].
+     */
     fun mapMetrics(
         aircraft: List<AircraftState>,
         stats: PipelineStats.Snapshot,
         sparkline: List<Float>,
         config: com.laviavi.adsbandroid.pipeline.AppConfig,
+        sessionMaxRangeNm: Double? = null,
     ): LiveMetrics {
-        val maxRange = aircraft.mapNotNull { it.distanceNm }.maxOrNull()
         return LiveMetrics(
             trackedCount = aircraft.size,
             framesPerSecond = stats.messagesPerSecond.toInt().toString(),
             validPercent = if (stats.windowTested > 0)
                 "%.1f".format(stats.windowAcceptRatePercent) else "0",
-            maxRangeMi = maxRange?.let { config.distanceUnit.formatValue(it) } ?: "0",
+            maxRangeMi = sessionMaxRangeNm?.let { config.distanceUnit.formatValue(it) } ?: "0",
             gainDb = "---", // filled from GainOptions by caller
             sparklineData = sparkline,
         )

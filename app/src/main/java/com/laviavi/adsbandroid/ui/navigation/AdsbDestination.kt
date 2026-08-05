@@ -13,7 +13,7 @@ enum class AdsbDestination(
     val label: String,
     val icon: ImageVector,
 ) {
-    LIVE("live", "Live", Icons.Outlined.List),
+    LIVE("live", "Traffic", Icons.Outlined.List),
     MAP("map", "Map", Icons.Outlined.Map),
     RECEIVER("receiver", "Receiver", Icons.Outlined.Radar),
     LOGS("logs", "Logs", Icons.Outlined.Terminal),

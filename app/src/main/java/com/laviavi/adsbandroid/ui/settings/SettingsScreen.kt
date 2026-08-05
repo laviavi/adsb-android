@@ -59,7 +59,6 @@ fun SettingsScreen(
     onConfigChange: (AppConfig) -> Unit,
     modifier: Modifier = Modifier,
     onOpenOfflineMaps: () -> Unit = {},
-    onOpenStats: () -> Unit = {},
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
     onRequestLocationPermission: () -> Unit = {},
     onBack: () -> Unit = {},
@@ -68,7 +67,7 @@ fun SettingsScreen(
     val gainOptions by viewModel.gainOptions.collectAsStateWithLifecycle()
     SettingsScreenContent(
         config, driverInstalled, gainOptions, onConfigChange,
-        onOpenOfflineMaps = onOpenOfflineMaps, onOpenStats = onOpenStats, onUpdateGps = onUpdateGps,
+        onOpenOfflineMaps = onOpenOfflineMaps, onUpdateGps = onUpdateGps,
         onRequestLocationPermission = onRequestLocationPermission, onBack = onBack, modifier = modifier,
     )
 }
@@ -83,7 +82,6 @@ private fun SettingsScreenContent(
     onRequestLocationPermission: () -> Unit = {},
     onBack: () -> Unit = {},
     onOpenOfflineMaps: () -> Unit = {},
-    onOpenStats: () -> Unit = {},
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
     modifier: Modifier = Modifier,
 ) {
@@ -153,7 +151,6 @@ private fun SettingsScreenContent(
                     BaseMapSection(config, onConfigChange)
                     OfflineMapsSection(onOpenOfflineMaps)
                     OfflineTileSourceSection(config, onConfigChange)
-                    StatsSection(onOpenStats)
                     DataSection(config, onConfigChange)
                     AboutSection()
                 }
@@ -588,29 +585,6 @@ private fun AboutSection() {
             style = MaterialTheme.typography.bodySmall,
             color = AdsbColors.TextSecondary,
         )
-    }
-}
-
-@Composable
-private fun StatsSection(onOpen: () -> Unit) {
-    SettingsSection("Aircraft stats", "How many times you've seen each tail or ICAO, by airline.") {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, AdsbColors.Outline, RoundedCornerShape(8.dp))
-                .clickable(onClick = onOpen)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "View aircraft stats",
-                style = MaterialTheme.typography.bodyMedium,
-                color = AdsbColors.TextPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            Text("›", style = MaterialTheme.typography.titleMedium, color = AdsbColors.TextSecondary)
-        }
     }
 }
 

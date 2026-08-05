@@ -5,8 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,72 +33,55 @@ private val dateFormat = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.US)
 @Composable
 fun StatsScreen(
     visits: List<AircraftVisitEntity>,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val summaries = remember(visits) { summarizeVisits(visits) }
     var tab by remember { mutableStateOf(StatsTab.AIRLINE) }
     var selected by remember { mutableStateOf<AircraftSummary?>(null) }
 
-    Scaffold(
-        modifier = modifier,
-        containerColor = AdsbColors.Background,
-        topBar = {
-            TopAppBar(
-                title = { Text("Aircraft stats") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = AdsbColors.Background),
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(
-                selectedTabIndex = tab.ordinal,
-                containerColor = AdsbColors.Surface,
-                contentColor = AdsbColors.Primary,
-            ) {
-                StatsTab.entries.forEach { t ->
-                    Tab(selected = tab == t, onClick = { tab = t }, text = { Text(t.label, fontSize = 12.sp) })
-                }
+    Column(modifier.fillMaxSize().background(AdsbColors.Background)) {
+        TabRow(
+            selectedTabIndex = tab.ordinal,
+            containerColor = AdsbColors.Surface,
+            contentColor = AdsbColors.Primary,
+        ) {
+            StatsTab.entries.forEach { t ->
+                Tab(selected = tab == t, onClick = { tab = t }, text = { Text(t.label, fontSize = 12.sp) })
             }
+        }
 
-            val shown = when (tab) {
-                StatsTab.AIRLINE -> summaries.filter { it.isAirline }
-                StatsTab.PRIVATE -> summaries.filterNot { it.isAirline }
+        val shown = when (tab) {
+            StatsTab.AIRLINE -> summaries.filter { it.isAirline }
+            StatsTab.PRIVATE -> summaries.filterNot { it.isAirline }
+        }
+
+        if (shown.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (tab == StatsTab.AIRLINE) "Airline aircraft appear here once they've departed."
+                    else "Private aircraft appear here once they've departed.",
+                    color = AdsbColors.TextSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
-
-            if (shown.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (tab == StatsTab.AIRLINE) "Airline aircraft appear here once they've departed."
-                        else "Private aircraft appear here once they've departed.",
-                        color = AdsbColors.TextSecondary,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            } else when (tab) {
-                StatsTab.AIRLINE -> {
-                    val grouped = shown
-                        .groupBy { it.operator?.takeIf { o -> o.isNotBlank() } ?: "Unknown airline" }
-                        .entries.sortedBy { it.key }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (airline, group) ->
-                            item(key = "hdr_$airline") { AirlineHeader(airline, group) }
-                            items(group.sortedByDescending { it.timesSeen }, key = { it.icao }) {
-                                StatsRow(it, onClick = { selected = it })
-                            }
-                        }
-                    }
-                }
-                StatsTab.PRIVATE -> {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(shown.sortedByDescending { it.timesSeen }, key = { it.icao }) {
+        } else when (tab) {
+            StatsTab.AIRLINE -> {
+                val grouped = shown
+                    .groupBy { it.operator?.takeIf { o -> o.isNotBlank() } ?: "Unknown airline" }
+                    .entries.sortedBy { it.key }
+                LazyColumn(Modifier.fillMaxSize()) {
+                    grouped.forEach { (airline, group) ->
+                        item(key = "hdr_$airline") { AirlineHeader(airline, group) }
+                        items(group.sortedByDescending { it.timesSeen }, key = { it.icao }) {
                             StatsRow(it, onClick = { selected = it })
                         }
+                    }
+                }
+            }
+            StatsTab.PRIVATE -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(shown.sortedByDescending { it.timesSeen }, key = { it.icao }) {
+                        StatsRow(it, onClick = { selected = it })
                     }
                 }
             }

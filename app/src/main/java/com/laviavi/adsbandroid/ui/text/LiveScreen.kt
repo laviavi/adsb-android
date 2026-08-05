@@ -158,7 +158,7 @@ fun LiveScreen(
                                 valueColor = AdsbColors.Success,
                             )
                             MetricTile(
-                                value = metrics.maxRangeMi, label = "max range mi",
+                                value = metrics.maxRangeMi, label = "Max Range(miles)",
                                 modifier = Modifier.weight(1f).clickable(onClick = onNavigateToReceiver),
                             )
                         }

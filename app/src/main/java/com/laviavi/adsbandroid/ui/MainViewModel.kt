@@ -68,6 +68,9 @@ class MainViewModel @Inject constructor() : ViewModel() {
     val bestRangeEver: StateFlow<com.laviavi.adsbandroid.data.BestRangeRecordEntity?> = _bestRangeEver.asStateFlow()
     fun onBestRangeEver(record: com.laviavi.adsbandroid.data.BestRangeRecordEntity?) { _bestRangeEver.value = record }
 
+    private val _sessionMaxRangeNm = MutableStateFlow<Double?>(null)
+    fun onSessionMaxRange(distanceNm: Double?) { _sessionMaxRangeNm.value = distanceNm }
+
     /** Which metric the coverage polar plots. Presentation-only, not persisted. */
     private val _coverageMode = MutableStateFlow(CoverageMode.RANGE)
     val coverageMode: StateFlow<CoverageMode> = _coverageMode.asStateFlow()
@@ -128,8 +131,10 @@ class MainViewModel @Inject constructor() : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val liveMetrics: StateFlow<LiveMetrics> = combine(_aircraft, _stats, _config) { acList, snapshot, cfg ->
+        Triple(acList, snapshot, cfg)
+    }.combine(_sessionMaxRangeNm) { (acList, snapshot, cfg), maxRangeNm ->
         val sparkline = synchronized(_sparklineBuffer) { _sparklineBuffer.toList() }
-        UiMapper.mapMetrics(acList, snapshot, sparkline.map { it }, cfg)
+        UiMapper.mapMetrics(acList, snapshot, sparkline.map { it }, cfg, maxRangeNm)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LiveMetrics())
 
     val receiverStatus: StateFlow<ReceiverStatusUi> = combine(_sourceState, _stats) { state, snapshot ->

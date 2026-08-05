@@ -39,8 +39,7 @@ import com.laviavi.adsbandroid.ui.navigation.AdsbDestination
 import com.laviavi.adsbandroid.ui.offline.OfflineMapsScreen
 import com.laviavi.adsbandroid.ui.receiver.ReceiverScreen
 import com.laviavi.adsbandroid.ui.settings.SettingsScreen
-import com.laviavi.adsbandroid.ui.stats.StatsScreen
-import com.laviavi.adsbandroid.ui.text.LiveScreen
+import com.laviavi.adsbandroid.ui.text.TrafficScreen
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -69,6 +68,7 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch { service.coverage.collect { viewModel.onCoverage(it) } }
             lifecycleScope.launch { service.allTimeCoverage.collect { viewModel.onAllTimeCoverage(it) } }
             lifecycleScope.launch { service.bestRangeEver.collect { viewModel.onBestRangeEver(it) } }
+            lifecycleScope.launch { service.sessionMaxRangeNm.collect { viewModel.onSessionMaxRange(it) } }
         }
         override fun onServiceDisconnected(name: ComponentName) {
             pipelineService = null
@@ -115,9 +115,6 @@ class MainActivity : ComponentActivity() {
 
 /** Sub-screen route, reached from Settings rather than the navigation bar. */
 private const val ROUTE_OFFLINE_MAPS = "offline_maps"
-
-/** Sub-screen route, reached from Settings — same reasoning as [ROUTE_OFFLINE_MAPS]. */
-private const val ROUTE_STATS = "stats"
 
 /** Opens the system share sheet for a CSV written under external app storage. */
 private fun shareCsv(context: android.content.Context, file: java.io.File) {
@@ -218,7 +215,7 @@ private fun AdsbScaffold(
                 modifier = Modifier.weight(1f),
             ) {
                 composable(AdsbDestination.LIVE.route) {
-                    LiveScreen(
+                    TrafficScreen(
                         viewModel = viewModel,
                         onAircraftClick = { icao ->
                             viewModel.selectAircraft(icao)
@@ -243,6 +240,8 @@ private fun AdsbScaffold(
                         onStop = onStop,
                         onReconnect = onReconnect,
                         onResetCounters = onResetCounters,
+                        onClearHistory = onClearHistory,
+                        onShareHistory = onShareHistory,
                     )
                 }
                 composable(AdsbDestination.MAP.route) {
@@ -261,11 +260,7 @@ private fun AdsbScaffold(
                     )
                 }
                 composable(AdsbDestination.LOGS.route) {
-                    LogsScreen(
-                        viewModel = viewModel,
-                        onClearHistory = onClearHistory,
-                        onShareHistory = onShareHistory,
-                    )
+                    LogsScreen(viewModel = viewModel)
                 }
                 composable(AdsbDestination.SETTINGS.route) {
                     SettingsScreen(
@@ -273,7 +268,6 @@ private fun AdsbScaffold(
                         driverInstalled = driverInstalled,
                         onConfigChange = onConfigChange,
                         onOpenOfflineMaps = { navController.navigate(ROUTE_OFFLINE_MAPS) },
-                        onOpenStats = { navController.navigate(ROUTE_STATS) },
                         onUpdateGps = onUpdateGps,
                         onRequestLocationPermission = {
                             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -295,13 +289,6 @@ private fun AdsbScaffold(
                     OfflineMapsScreen(
                         observerLat = config.observerLatitude,
                         observerLon = config.observerLongitude,
-                        onBack = { navController.popBackStack() },
-                    )
-                }
-                composable(ROUTE_STATS) {
-                    val visits by viewModel.visits.collectAsStateWithLifecycle()
-                    StatsScreen(
-                        visits = visits,
                         onBack = { navController.popBackStack() },
                     )
                 }

@@ -181,6 +181,17 @@ class PipelineService : Service() {
     private val _bestRangeEver = MutableStateFlow<BestRangeRecordEntity?>(null)
     val bestRangeEver: StateFlow<BestRangeRecordEntity?> = _bestRangeEver.asStateFlow()
 
+    /**
+     * Farthest distance seen in the current receiver session — unlike an
+     * instantaneous max over the live aircraft table, this doesn't drop back
+     * down once the far aircraft leaves range. Resets only where a new
+     * session begins: [clearSessionState] (app start, Start button, a
+     * reconnect, or the dongle being replugged) — never on a manual
+     * "Reset counters".
+     */
+    private val _sessionMaxRangeNm = MutableStateFlow<Double?>(null)
+    val sessionMaxRangeNm: StateFlow<Double?> = _sessionMaxRangeNm.asStateFlow()
+
     private val _config = MutableStateFlow(AppConfig())
     val config: StateFlow<AppConfig> = _config.asStateFlow()
 
@@ -615,6 +626,7 @@ class PipelineService : Service() {
         lastHistoryInsertMs.clear()
         routeLookupInFlight.clear()
         metaLookupInFlight.clear()
+        _sessionMaxRangeNm.value = null
         // Reset runs on the repository's own confined dispatcher and is
         // submitted before startPipeline(), so it always finishes ahead of the
         // first decoded frame from the new session.
@@ -975,6 +987,7 @@ class PipelineService : Service() {
         maybeEnrichRoute(state)
         maybeEnrichMeta(state)
         maybeEnrichFa(state)
+        state.distanceNm?.let { d -> if (d > (_sessionMaxRangeNm.value ?: -1.0)) _sessionMaxRangeNm.value = d }
     }
 
     /** Async route lookup, gated by config, cached, at most once in flight per ICAO. */

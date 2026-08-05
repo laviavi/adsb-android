@@ -3,18 +3,29 @@
 Living document. Rewritten whenever work lands, so it always describes the code as
 it is now â€” not a dated audit with corrections bolted on.
 
-**Last updated:** 2026-08-03 â€” Coverage-history heatmap, best-range-ever, and
-first-time-seen milestone notifications added (Receiver tab + PipelineService);
-a selectable OSM/Esri base map (Settings â†’ Base map); the app version is now shown
-in Settings. Live row split into a top strip (identity + data block) plus
-full-width airline/route and type lines (5 lines total); Aircraft Stats screen
-(Settings â†’ "View aircraft stats") logging every departure to an append-only
-`aircraft_visits` table, grouped by airline vs private aircraft. Phase 1â€“4 UI
-models, shared atoms, navigation, Live screen, AircraftRow, AircraftDetailSheet,
-LogsScreen, ReceiverScreen (viewModel wrapper), SettingsScreen (viewModel wrapper),
-MapScreen all compiling. PipelineService now exposes public `startPipeline()`,
-`stopPipeline()`, `reconnect()`. TextListScreen deleted (replaced by LiveScreen +
-5-tab NavigationSuiteScaffold). Version **v1.6.0** (`versionCode` 15).
+**Last updated:** 2026-08-05 â€” "Live" nav destination renamed to "Traffic";
+History (formerly a Logs sub-tab) and Stats (formerly a Settings-pushed screen)
+moved to live inside Traffic as peer sub-tabs alongside Live (default). Logs is
+now Events-only (its History sub-tab is gone). Settings lost its "Aircraft
+stats" entry point. StatsScreen's own Scaffold/TopAppBar/back-arrow were
+stripped since it is now an embedded peer tab, not a pushed screen — Live and
+History's content and behaviour are unchanged. The Live tab's "max range mi"
+metric is now a running per-session max (survives an aircraft leaving range;
+resets only on app start, Start-button, reconnect, or dongle replug — never on
+a manual "Reset counters") instead of an instantaneous max over the currently
+tracked list; its label is now "Max Range(miles)". Version **v1.6.5**
+(`versionCode` 20).
+
+Coverage-history heatmap, best-range-ever, and first-time-seen milestone
+notifications added (Receiver tab + PipelineService); a selectable OSM/Esri
+base map (Settings â†’ Base map); the app version is now shown in Settings. Live
+row split into a top strip (identity + data block) plus full-width
+airline/route and type lines (5 lines total). Phase 1â€“4 UI models, shared
+atoms, navigation, Live screen, AircraftRow, AircraftDetailSheet, LogsScreen,
+ReceiverScreen (viewModel wrapper), SettingsScreen (viewModel wrapper),
+MapScreen all compiling. PipelineService exposes public `startPipeline()`,
+`stopPipeline()`, `reconnect()`. TextListScreen deleted (replaced by LiveScreen
++ 5-tab NavigationSuiteScaffold).
 **Method:** read the source tree and tests; verified by reading files, not recall.
 **Current:** 400 `:core:receiver` + 69 `:app` tests pass. Debug APK builds.
 
@@ -126,10 +137,11 @@ Parity harnesses stayed green throughout.
 | Receiver screen: status, accept-rate panel with guidance, pipeline counters incl. drop counter, tuning summary | âœ… â€” own navigation destination via NavigationSuiteScaffold |
 | UI models (`AircraftRowUi`, `MapMarker`, `LiveMetrics`, `ReceiverStatusUi`, `DiagnosticEvent`) | âœ… |
 | Shared atoms (`StatusStrip`, `MetricTile`, `Sparkline`, `StatusPanel`, `SignalBars`, `FreshnessDot`) | âœ… |
-| 5-tab NavigationSuiteScaffold (Live, Map, Receiver, Logs, Settings) | âœ… |
-| Live screen: metrics header, sort bar, dense AircraftRow, non-nominal states, start/stop | âœ… |
+| 5-tab NavigationSuiteScaffold (Traffic, Map, Receiver, Logs, Settings) | âœ… |
+| Traffic screen: Live (default) / History / Stats sub-tabs | âœ… Â§33 |
+| Live sub-tab: metrics header, sort bar, dense AircraftRow, non-nominal states, start/stop | âœ… |
 | Aircraft detail sheet (ModalBottomSheet, freshness dots, diagnosis cards, message timeline) | âœ… |
-| Logs screen (Events + History tabs) | âœ… |
+| Logs screen (Events only) | âœ… |
 | MainViewModel rewrite (derived UI flows, diagnostics, sparkline) | âœ… |
 | PipelineService public start/stop/reconnect API | âœ… |
 | Design-token module (`:core:ui`) | âŒ deferred (ponytail: no second consumer) |
@@ -170,7 +182,7 @@ reason. Every other order changes continuously in flight.
 | Network enrichment â€” metadata (hexdb.io, OpenSky, adsbdb aircraft) | âœ… (FAA CSV removed â€” never used, never generated in Python either) |
 | Network enrichment â€” FlightAware scrape (type, airline, route) | âœ… |
 | Route lookup (adsbdb) + 24 h cache | âœ… |
-| History (departed aircraft, Room, tab) | âœ… |
+| History (departed aircraft, Room, Traffic sub-tab) | âœ… Â§33 |
 | Settings screen | âš ï¸ sectioned (Receiver / Sort / Gain / PPM / Tuning / Observer / Auto-stop / Data) but not searchable |
 | Landscape layout | âœ… rows fold to one detail line |
 | Map | âœ… osmdroid, dark-filtered tiles, range rings on the named range scale, observer, single-overlay markers, trails, label collision, clustering + decimation chip, controls, layers panel, selection sheet |
@@ -178,7 +190,7 @@ reason. Every other order changes continuously in flight.
 | Display units setting (mi/nm/km) | âœ… `DistanceUnit` in `:core:receiver`, persisted, threaded through rows/map/coverage |
 | Position history for trails | âœ… `AircraftState.positionHistory` (bounded 200, duplicate-suppressed); parity unaffected â€” the harness compares an explicit field allow-list |
 | Aircraft detail / `_diagnose()` port | âœ… ModalBottomSheet with freshness dots, diagnosis cards, TCAS, message timeline |
-| Logs / diagnostic events | âœ… Events tab (DiagnosticEventBuffer ring, severity-colored) + History tab |
+| Logs / diagnostic events | âœ… Events-only screen (DiagnosticEventBuffer ring, severity-colored); History moved to Traffic Â§33 |
 | Debug bundle | âŒ deferred to post-v1.0.0 |
 | Coverage + performance metrics | âœ… backend + CSV export, see Â§11 â€” no UI (`CoverageCard`/`RateChart` deferred to Phase 4's screen rebuild) |
 | CSV export wired to UI | âŒ `CsvExporter`, `PerformanceCsvLogger`, `CoverageCsvLogger` all write files with no in-app entry point to share/view them |
@@ -1422,9 +1434,11 @@ mirroring `HistoryScreen.kt`'s own in-memory filter/sort/group pattern rather th
 writing `GROUP BY` queries. Pure function, unit-tested with plain JUnit
 (`AircraftStatsTests.kt`), no Robolectric needed.
 
-**`ui/stats/StatsScreen.kt`** — reached via Settings → "Aircraft stats" (mirrors the
-existing "Manage offline maps" section/route pattern exactly, not a 6th bottom-nav
-tab, per Avi's choice). Two tabs, "By airline" (grouped, sticky header per airline
+**`ui/stats/StatsScreen.kt`** — originally reached via Settings → "Aircraft stats"
+(mirrored the "Manage offline maps" section/route pattern, not a 6th bottom-nav
+tab). **Superseded by §33 (2026-08-05):** now a peer sub-tab inside Traffic
+instead, with its own Scaffold/TopAppBar/back-arrow stripped. Two tabs, "By
+airline" (grouped, sticky header per airline
 showing aircraft count + total sightings) and "Private aircraft" (flat, sorted by
 times-seen). Tapping a row opens a `ModalBottomSheet` listing every visit's date
 (`MM/dd/yyyy HH:mm`, matching the CSV-export format from §25) and duration (reuses
@@ -1640,3 +1654,81 @@ even when an unknown placeholder precedes it in the flights map.
 
 Full suite: 400 core + 78 app tests (5 new `FlightAwareEnrichmentTests`), 0
 failures; debug APK builds. Version bumped to v1.6.4 before this build.
+
+## 33. "Live" nav destination renamed to "Traffic"; History and Stats moved in as sub-tabs (2026-08-05, v1.6.5)
+
+Navigation restructuring, mockup-first per Avi's instruction (built with
+`mcp__visualize__show_widget`, confirmed via `AskUserQuestion` before any code
+changed). No content redesign — Live, History, and Stats each render exactly
+as before; only where they live in the nav changed.
+
+**`AdsbDestination.LIVE`** — label changed `"Live"` → `"Traffic"`. Route
+string (`"live"`) and enum name (`LIVE`) untouched; only the bottom-nav label
+changed.
+
+**`ui/text/TrafficScreen.kt`** (new) — hosts a `TabRow` (Live / History /
+Stats, Live default) above whichever sub-tab is selected:
+- **Live** → `LiveScreen(...)` unchanged, called with the same params it
+  always took.
+- **History** → `HistoryScreen(...)`, moved out of `LogsScreen`'s own
+  `TabRow` (was `LogTab.HISTORY`).
+- **Stats** → `StatsScreen(visits = visits)`, moved out of the
+  Settings-pushed `ROUTE_STATS` route (see §27).
+
+**`ui/stats/StatsScreen.kt`** — its own `Scaffold`/`TopAppBar`/back-arrow were
+stripped (Avi's explicit call over `AskUserQuestion`): as a peer sub-tab
+inside Traffic, "back" had no destination to go to. `onBack` param removed
+from the signature; content (the airline/private `TabRow`, list, bottom
+sheet) is otherwise byte-for-byte what it was.
+
+**`ui/logs/LogsScreen.kt`** — its `LogTab` enum and `TabRow` are gone; it is
+now just the Events list. `onClearHistory`/`onShareHistory` params removed
+(no longer needed once History left this screen).
+
+**`ui/settings/SettingsScreen.kt`** — the "Aircraft stats" section
+(`StatsSection`) and its `onOpenStats` param (both overloads) removed —
+Stats is reachable from Traffic now, not from Settings.
+
+**`MainActivity.kt`** — `ROUTE_STATS` and its `composable(ROUTE_STATS) { … }`
+block deleted; the `AdsbDestination.LIVE.route` composable now renders
+`TrafficScreen` (passing the same Live params plus `onClearHistory`/
+`onShareHistory`, which used to go to `LogsScreen`); `SettingsScreen`'s call
+site drops `onOpenStats`; `LogsScreen`'s call site drops both history params.
+
+Full suite: 400 core + 78 app tests, 0 failures (no test referenced any of
+the touched screens' signatures); debug APK builds. Version bumped to v1.6.5
+before this build.
+
+**Also folded into v1.6.5 — "max range mi" made session-scoped, not instantaneous.**
+Previously `UiMapper.mapMetrics()` computed `aircraft.mapNotNull { it.distanceNm }.maxOrNull()`
+every publish tick — a pure function of the *currently tracked* list, so it
+dropped back down the moment the farthest aircraft aged out or left range.
+Changed to track a running max for the whole receiver session instead:
+
+- **`PipelineService._sessionMaxRangeNm`** (new `MutableStateFlow<Double?>`) —
+  updated in `onAircraftUpdated()` (fired for every message merged into the
+  aircraft table) via a plain `if (d > current) update` — no aircraft-list scan
+  needed, since it already sees every state update as it happens.
+- **Reset point: `clearSessionState()`**, the same function that already zeroes
+  `stats`, `icaoCache`, and the in-flight lookup sets at every session
+  boundary — called from `startPipeline()`, `restartPipeline()`/`reconnect()`
+  (dongle replug goes through this via `hotplugReceiver.onAttached`), and the
+  connection-loss retry loop. **Not** called from `resetStatsCounters()`
+  (the overflow menu's "Reset counters"), so that action does not touch it —
+  matches the ask ("resets only... after the app stops, or the dongle
+  restarts"), not on every counter reset.
+- Threaded through: `PipelineService.sessionMaxRangeNm` → `MainActivity`
+  collects it into `MainViewModel.onSessionMaxRange()` → a new
+  `_sessionMaxRangeNm` StateFlow combined into `liveMetrics` (as a second,
+  nested `combine` rather than a 4-arg one — `kotlinx.coroutines`' typed
+  4/5-arg `combine` overloads are `@FlowPreview`, so this avoids opting into
+  a preview API for a straightforward addition) → `UiMapper.mapMetrics()` now
+  takes `sessionMaxRangeNm: Double?` instead of deriving it from the aircraft
+  list.
+- Label changed from `"max range mi"` to `"Max Range(miles)"` in
+  `LiveScreen.kt`'s `MetricTile` (verbatim wording as given, not the app's
+  usual lowercase-terse style).
+
+Full suite: 400 core + 78 app tests, 0 failures (no existing test asserted the
+old instantaneous-max behavior); debug APK builds. Still v1.6.5/`versionCode`
+20 — bundled into the same not-yet-released build as §33's nav change.

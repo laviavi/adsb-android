@@ -15,45 +15,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.laviavi.adsbandroid.ui.MainViewModel
-import com.laviavi.adsbandroid.ui.history.HistoryScreen
 import com.laviavi.adsbandroid.ui.model.*
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 import java.text.SimpleDateFormat
 import java.util.*
 
-private enum class LogTab(val label: String) { EVENTS("Events"), HISTORY("History") }
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun LogsScreen(
-    viewModel: MainViewModel,
-    onClearHistory: () -> Unit,
-    onShareHistory: () -> Unit,
-) {
-    var tab by remember { mutableStateOf(LogTab.EVENTS) }
+fun LogsScreen(viewModel: MainViewModel) {
     val events by viewModel.diagnosticEvents.collectAsStateWithLifecycle()
-    val history by viewModel.history.collectAsStateWithLifecycle()
 
     Column(modifier = Modifier.fillMaxSize().background(AdsbColors.Background)) {
-        TabRow(
-            selectedTabIndex = tab.ordinal,
-            containerColor = AdsbColors.Surface,
-            contentColor = AdsbColors.Primary,
-        ) {
-            LogTab.entries.forEach { t ->
-                Tab(
-                    selected = tab == t,
-                    onClick = { tab = t },
-                    text = { Text(t.label, fontSize = 12.sp, fontWeight = FontWeight.W600) },
-                )
-            }
-        }
-
-        when (tab) {
-            LogTab.EVENTS -> EventsList(events)
-            LogTab.HISTORY -> HistoryScreen(entries = history, onClear = onClearHistory, onShare = onShareHistory)
-        }
+        EventsList(events)
     }
 }
 

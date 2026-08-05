@@ -1,0 +1,81 @@
+package com.laviavi.adsbandroid.ui.text
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.laviavi.adsbandroid.pipeline.AppConfig
+import com.laviavi.adsbandroid.ui.MainViewModel
+import com.laviavi.adsbandroid.ui.history.HistoryScreen
+import com.laviavi.adsbandroid.ui.stats.StatsScreen
+import com.laviavi.adsbandroid.ui.theme.AdsbColors
+
+private enum class TrafficTab(val label: String) { LIVE("Live"), HISTORY("History"), STATS("Stats") }
+
+/**
+ * Traffic destination: Live (default), History, and Stats as peer sub-tabs.
+ * Each tab's content is the pre-existing screen, unchanged.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrafficScreen(
+    viewModel: MainViewModel,
+    onAircraftClick: (String) -> Unit,
+    onNavigateToReceiver: () -> Unit,
+    onShowOnMap: (String) -> Unit,
+    onConfigChange: (AppConfig) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onReconnect: () -> Unit,
+    onResetCounters: () -> Unit,
+    onClearHistory: () -> Unit,
+    onShareHistory: () -> Unit,
+) {
+    var tab by remember { mutableStateOf(TrafficTab.LIVE) }
+    val history by viewModel.history.collectAsStateWithLifecycle()
+    val visits by viewModel.visits.collectAsStateWithLifecycle()
+
+    Column(modifier = Modifier.fillMaxSize().background(AdsbColors.Background)) {
+        TabRow(
+            selectedTabIndex = tab.ordinal,
+            containerColor = AdsbColors.Surface,
+            contentColor = AdsbColors.Primary,
+        ) {
+            TrafficTab.entries.forEach { t ->
+                Tab(
+                    selected = tab == t,
+                    onClick = { tab = t },
+                    text = { Text(t.label, fontSize = 12.sp, fontWeight = FontWeight.W600) },
+                )
+            }
+        }
+
+        when (tab) {
+            TrafficTab.LIVE -> LiveScreen(
+                viewModel = viewModel,
+                onAircraftClick = onAircraftClick,
+                onNavigateToReceiver = onNavigateToReceiver,
+                onShowOnMap = onShowOnMap,
+                onConfigChange = onConfigChange,
+                onStart = onStart,
+                onStop = onStop,
+                onReconnect = onReconnect,
+                onResetCounters = onResetCounters,
+            )
+            TrafficTab.HISTORY -> HistoryScreen(entries = history, onClear = onClearHistory, onShare = onShareHistory)
+            TrafficTab.STATS -> StatsScreen(visits = visits)
+        }
+    }
+}
