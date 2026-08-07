@@ -661,7 +661,15 @@ class PipelineService : Service() {
                     currentSource = source
                     _sourceState.value = SourceState.Connecting
 
-                    openUsbSource(source)
+                    // Serialised against startPipeline()/restartPipeline() via the same
+                    // sessionLock: without this, a hotplug SDR_DEVICE_ATTACHED broadcast
+                    // (see hotplugReceiver.onAttached) can call restartPipeline() while
+                    // this retry-loop attempt is independently mid-open, sending two
+                    // overlapping iqsrc:// requests for the same device — the exact
+                    // LIBUSB_ERROR_BUSY scenario described above, except between this
+                    // loop's own reconnect and the hotplug accelerator rather than
+                    // between two explicit start/stop calls.
+                    sessionLock.withLock { openUsbSource(source) }
 
                     attempt = 0
                     val tuner = _gainOptions.value.let { it as? GainOptions.Available }?.tuner?.displayName

@@ -255,6 +255,7 @@ private fun AdsbScaffold(
                     ReceiverScreen(
                         viewModel = viewModel,
                         onConfigChange = onConfigChange,
+                        onStart = onStart,
                         onReconnect = onReconnect,
                         onStop = onStop,
                     )

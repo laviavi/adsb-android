@@ -15,8 +15,13 @@ resets only on app start, Start-button, reconnect, or dongle replug — never on
 a manual "Reset counters") instead of an instantaneous max over the currently
 tracked list; its label is now "Max Range(miles)". The Live/History/Stats tab
 row sits between Live's top bar and its filter chips, and the three sub-tabs
-are swipeable via `HorizontalPager`, not just tap-to-switch. Version
-**v1.6.5** (`versionCode` 20).
+are swipeable via `HorizontalPager`, not just tap-to-switch. The dongle
+reconnect race between the retry loop's own re-open and a hotplug-triggered
+`restartPipeline()` is fixed (both now serialise through `sessionLock`), and
+Traffic/Receiver's Start/Stop/Reconnect controls are unified (Receiver's
+Start/Stop was hardcoded "STOP" and did nothing when idle; both screens now
+confirm before Reconnect too, via shared `StopConfirmDialog`/
+`ReconnectConfirmDialog`). Version **v1.6.6** (`versionCode` 21).
 
 Coverage-history heatmap, best-range-ever, and first-time-seen milestone
 notifications added (Receiver tab + PipelineService); a selectable OSM/Esri
@@ -1760,3 +1765,40 @@ row.
 
 Full suite: 400 core + 78 app tests, 0 failures; debug APK builds. Still
 v1.6.5/`versionCode` 20.
+
+## 34. Dongle reconnect race fixed; Traffic/Receiver Start-Stop-Reconnect unified (2026-08-05, v1.6.6)
+
+Two independent fixes from the same review, not yet committed.
+
+**Reconnect race.** `startPipelineInternal()`'s own retry loop reopens the
+source on its own timer (`awaitRetry()` polling `UsbPresence`), entirely
+outside `sessionLock` — only the *outer* `startPipeline()`/`restartPipeline()`
+calls took that lock. `UsbHotplugReceiver.onAttached` → `restartPipeline()`
+is, by design, a second independent trigger for the same reopen ("Both
+callbacks are accelerators, not the recovery mechanism" —
+`PipelineService.kt`'s hotplug doc comment). On a real replug these two could
+fire near-simultaneously: the retry loop mid-`openUsbSource()` (an in-flight
+`iqsrc://` request already sent to the driver app) gets cancelled by
+`restartPipeline()`'s `teardownSession()`, which then launches a *second*
+`iqsrc://` for the same device — the driver app gets two overlapping opens
+and can get stuck holding the device, recoverable only by a full process
+kill (closing the loopback socket at the OS level is what actually resets
+the driver's state; a same-process Stop/Start doesn't). Fixed by wrapping the
+retry loop's own `openUsbSource(source)` call in `sessionLock.withLock {}` too
+— every path that can open a source now serialises through the same mutex,
+so no two can ever be in flight together.
+
+**Start/Stop/Reconnect unification.** `ReceiverAppBar`'s Start/Stop button was
+hardcoded `"STOP"` regardless of state and called `onStop()` again (a no-op)
+when already idle — there was no way to start from the Receiver tab except by
+misusing Reconnect. Fixed to mirror Traffic's dynamic label
+(`isRunning`-driven), and `ReceiverScreen` gained an `onStart` param wired
+from `MainActivity`. New shared `ui/components/PipelineConfirmDialogs.kt`
+(`StopConfirmDialog`, `ReconnectConfirmDialog`) replaces the two screens'
+near-duplicate inline `AlertDialog`s — the drift that let Receiver's button
+go stale in the first place — and both screens now confirm before Reconnect
+too (previously silent in both), per Avi's call: a reconnect ends the session
+the same way Stop does, so it gets the same guard.
+
+Full suite: 400 core + 78 app tests, 0 failures; debug APK builds. Version
+bumped to v1.6.6 (`versionCode` 21) before this build, then released.

@@ -62,6 +62,7 @@ fun LiveTopBar(
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showStopConfirm by remember { mutableStateOf(false) }
+    var showReconnectConfirm by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -124,7 +125,10 @@ fun LiveTopBar(
                 Icon(Icons.Default.MoreVert, "More options", tint = AdsbColors.TextSecondary)
             }
             DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
-                DropdownMenuItem(text = { Text("Reconnect source") }, onClick = { showOverflowMenu = false; onReconnect() })
+                DropdownMenuItem(
+                    text = { Text("Reconnect source") },
+                    onClick = { showOverflowMenu = false; showReconnectConfirm = true },
+                )
                 DropdownMenuItem(
                     text = { Text("Reset counters") },
                     onClick = { showOverflowMenu = false; onResetCounters() },
@@ -133,19 +137,11 @@ fun LiveTopBar(
         }
     }
 
-    // Stop confirmation
     if (showStopConfirm) {
-        AlertDialog(
-            onDismissRequest = { showStopConfirm = false },
-            title = { Text("Stop receiving?") },
-            text = { Text("The session and its counters end.") },
-            confirmButton = {
-                TextButton(onClick = { showStopConfirm = false; onStop() }) { Text("Stop") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showStopConfirm = false }) { Text("Cancel") }
-            },
-        )
+        StopConfirmDialog(onConfirm = onStop, onDismiss = { showStopConfirm = false })
+    }
+    if (showReconnectConfirm) {
+        ReconnectConfirmDialog(onConfirm = onReconnect, onDismiss = { showReconnectConfirm = false })
     }
 }
 

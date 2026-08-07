@@ -30,6 +30,8 @@ import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.pipeline.PipelineStats
 import com.laviavi.adsbandroid.pipeline.SourceState
 import com.laviavi.adsbandroid.ui.MainViewModel
+import com.laviavi.adsbandroid.ui.components.ReconnectConfirmDialog
+import com.laviavi.adsbandroid.ui.components.StopConfirmDialog
 import com.laviavi.adsbandroid.ui.model.CoverageMode
 import com.laviavi.adsbandroid.ui.model.CoverageWindow
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
@@ -55,6 +57,7 @@ private const val NM_TO_MI = 1.15078
 fun ReceiverScreen(
     viewModel: MainViewModel,
     onConfigChange: (AppConfig) -> Unit,
+    onStart: () -> Unit,
     onReconnect: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
@@ -79,6 +82,7 @@ fun ReceiverScreen(
     ) {
         ReceiverAppBar(
             isRunning = sourceState is SourceState.Running,
+            onStart = onStart,
             onReconnect = onReconnect,
             onStop = onStop,
         )
@@ -108,8 +112,14 @@ fun ReceiverScreen(
 }
 
 @Composable
-private fun ReceiverAppBar(isRunning: Boolean, onReconnect: () -> Unit, onStop: () -> Unit) {
+private fun ReceiverAppBar(
+    isRunning: Boolean,
+    onStart: () -> Unit,
+    onReconnect: () -> Unit,
+    onStop: () -> Unit,
+) {
     var confirmStop by remember { mutableStateOf(false) }
+    var confirmReconnect by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -121,7 +131,7 @@ private fun ReceiverAppBar(isRunning: Boolean, onReconnect: () -> Unit, onStop: 
         Text("Receiver", fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
         Spacer(Modifier.weight(1f))
         OutlinedButton(
-            onClick = onReconnect,
+            onClick = { confirmReconnect = true },
             shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
             border = BorderStroke(1.dp, AdsbColors.Outline),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = AdsbColors.TextPrimary),
@@ -131,8 +141,11 @@ private fun ReceiverAppBar(isRunning: Boolean, onReconnect: () -> Unit, onStop: 
             Text("RECONNECT", fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.96.sp)
         }
         Spacer(Modifier.width(AdsbDimens.SpacingSm))
+        // Same dynamic label/action as Traffic's Start/Stop button — previously
+        // hardcoded "STOP" here regardless of state, which called onStop() again
+        // (a no-op) when already idle instead of offering any way to start.
         Button(
-            onClick = { if (isRunning) confirmStop = true else onStop() },
+            onClick = { if (isRunning) confirmStop = true else onStart() },
             shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
             colors = ButtonDefaults.buttonColors(
                 containerColor = AdsbColors.Primary,
@@ -141,18 +154,15 @@ private fun ReceiverAppBar(isRunning: Boolean, onReconnect: () -> Unit, onStop: 
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             modifier = Modifier.height(36.dp),
         ) {
-            Text("STOP", fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.96.sp)
+            Text(if (isRunning) "STOP" else "START", fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.96.sp)
         }
     }
 
     if (confirmStop) {
-        AlertDialog(
-            onDismissRequest = { confirmStop = false },
-            title = { Text("Stop receiving?") },
-            text = { Text("The session and its counters end.") },
-            confirmButton = { TextButton(onClick = { confirmStop = false; onStop() }) { Text("Stop") } },
-            dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("Cancel") } },
-        )
+        StopConfirmDialog(onConfirm = onStop, onDismiss = { confirmStop = false })
+    }
+    if (confirmReconnect) {
+        ReconnectConfirmDialog(onConfirm = onReconnect, onDismiss = { confirmReconnect = false })
     }
 }
 
