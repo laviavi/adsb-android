@@ -146,6 +146,9 @@ class AircraftMetaEnrichment(
         return meta
     }
 
+    /** Releases the underlying HTTP engine's connection pool/threads. */
+    fun close() = client.close()
+
     // US: hexdb.io → OpenSky
     private suspend fun lookupUs(icao: String): AircraftMeta? {
         fetchHexdb(icao)?.let { return it }

@@ -1802,3 +1802,91 @@ the same way Stop does, so it gets the same guard.
 
 Full suite: 400 core + 78 app tests, 0 failures; debug APK builds. Version
 bumped to v1.6.6 (`versionCode` 21) before this build, then released.
+
+## 35. FA's initial attempt made timer-driven, capped at 2 requests/sec (2026-08-07)
+
+Root cause found while investigating why a real Canadian contact (C065DB, 2
+messages, weak signal, no callsign) never got FA-enriched despite "10+
+seconds" having passed: `FlightAwareEnrichment.maybeSchedule()` — the only
+thing that ever checked whether the 4s/5s delay had elapsed — was itself only
+ever called from `onAircraftUpdated()`, which only fires when a *new* message
+arrives. An aircraft that stops transmitting decodable frames before a
+message lands after the delay window never gets a second look, no matter how
+much wall-clock time passes.
+
+**Fix, not yet committed/released:**
+
+- `FA_INITIAL_DELAY`: 4s → 5s.
+- New 1s sweep coroutine (`sweepDueFirstAttempts()`, started in `init {}`)
+  scans idents that have never had an attempt (`!faCache.containsKey(ident)`)
+  and fires once `isFirstAttemptDue()` (new pure top-level fun, unit-tested)
+  says the 5s delay has passed — independent of any new message. Deliberately
+  scoped to **first attempts only**: retries (`FA_RETRY_INTERVAL` = 30s) stay
+  gated behind a live message in `maybeSchedule()`, same as before. Sweeping
+  retries too would mean an aircraft that's actually departed keeps getting
+  retried forever by the timer instead of naturally falling silent once no
+  more messages arrive for it — the sweep only had to cover the one case that
+  was actually broken.
+- New `FaRateLimiter` (sliding 1s window, unit-tested) caps every outbound FA
+  request — sweep-triggered or message-triggered, first attempt or retry — at
+  2/second, shared across all aircraft, so FlightAware never sees a burst
+  from either path.
+- New file `FaSchedulingTests.kt` (6 tests): delay-boundary cases for
+  `isFirstAttemptDue`, and cap/window-slide/shared-budget cases for
+  `FaRateLimiter`.
+
+Full suite: 400 core + 84 app tests (6 new), 0 failures; debug APK builds.
+Released as part of v1.6.7 (§36).
+
+## 36. Idle watchdog and a new Exit action now actually release everything (2026-08-07, v1.6.7)
+
+Follow-up to the investigation into whether the app "shuts down completely"
+on dongle disconnect. Found the real gap: `MainActivity` calls
+`bindService(..., BIND_AUTO_CREATE)` in `onCreate()` and only unbinds in
+`onDestroy()` — bound for the Activity's whole lifetime, not just while
+foregrounded. Under Android's service lifecycle rules, `stopSelf()` on a
+service that's still bound clears the "started" flag but does **not**
+destroy the instance — it stays resident, notification and background
+coroutines included, until every bound client also disconnects. Since
+nothing ever told `MainActivity` to unbind, the idle-source watchdog's
+`stopSelf()` (§ "stopping to save battery") was very likely a no-op in
+practice.
+
+**`PipelineService.kt`:**
+- New `releaseResources()` (private, suspend) — the single place that closes
+  everything: unregisters the hotplug receiver, stops GPS updates, cancels
+  the pipeline job and closes its source, closes all three loggers, and
+  (new) closes `routeEnrichment`/`aircraftMetaEnrichment`/
+  `flightAwareEnrichment`'s ktor `HttpClient`s, which were never explicitly
+  closed before — they just leaked until the process died. `onDestroy()` now
+  calls this instead of duplicating the same steps inline.
+- Idle watchdog's `onExpire` now calls `releaseResources()`,
+  `ServiceCompat.stopForeground(..., STOP_FOREGROUND_REMOVE)`, sets new
+  `shutdownRequested: StateFlow<Boolean>`, then `stopSelf()` +
+  `serviceScope.cancel()` — an actual full teardown, not just a flag that
+  silently did nothing while bound.
+- New public `fun exit()` — same full release, blocking (bounded 2s) so the
+  caller can safely unbind/finish right after it returns instead of racing
+  the async cleanup. Used by the new Exit action, not the watchdog.
+
+**`RouteEnrichment`/`AircraftMetaEnrichment`/`FlightAwareEnrichment`:** each
+gained a `fun close() = client.close()`.
+
+**`MainActivity.kt`:** tracks `isBound` explicitly; collects
+`service.shutdownRequested` and unbinds when it fires (fixes the watchdog
+gap above). New `onExit` callback: calls `pipelineService.exit()`, unbinds,
+`finishAffinity()`, then `Process.killProcess(Process.myPid())` — a
+deliberate, non-default-Android-pattern choice (usually you'd just let the
+OS reclaim an empty process) made because Avi explicitly asked for an
+active, immediate release, not an eventual one. `connection`'s type was
+made explicit (`ServiceConnection`) — the new self-referencing
+`unbindService(connection)` call inside its own `onServiceConnected` hit a
+Kotlin recursive-type-inference error without it.
+
+**Settings → Exit section** (new `ExitSection`, bottom of the root page,
+below About): a red "Exit app" button behind a new `ExitConfirmDialog`
+(alongside `StopConfirmDialog`/`ReconnectConfirmDialog` in
+`ui/components/PipelineConfirmDialogs.kt`).
+
+Full suite: 400 core + 84 app tests, 0 failures; debug APK builds. Version
+bumped to v1.6.7 (`versionCode` 22) before this build, then released.

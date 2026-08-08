@@ -50,12 +50,29 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
     private var pipelineService: PipelineService? = null
+    private var isBound = false
 
-    private val connection = object : ServiceConnection {
+    private val connection: ServiceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             val service = (binder as PipelineService.LocalBinder).getService()
             pipelineService = service
+            isBound = true
             viewModel.onServiceConnected(true)
+            // stopSelf() alone doesn't destroy a service still bound to this Activity
+            // (bound for the Activity's whole lifetime, not just while foregrounded) —
+            // see PipelineService.shutdownRequested's doc comment. Without unbinding
+            // here, the idle-source watchdog's stop would leave the service resident
+            // but inert instead of actually going away.
+            lifecycleScope.launch {
+                service.shutdownRequested.collect { requested ->
+                    if (requested && isBound) {
+                        unbindService(connection)
+                        isBound = false
+                        pipelineService = null
+                        viewModel.onServiceConnected(false)
+                    }
+                }
+            }
             lifecycleScope.launch { service.aircraft.collect { viewModel.onAircraftUpdate(it) } }
             lifecycleScope.launch { service.stats.stats.collect { viewModel.onStatsUpdate(it) } }
             lifecycleScope.launch { service.sourceState.collect { viewModel.onSourceState(it) } }
@@ -72,6 +89,7 @@ class MainActivity : ComponentActivity() {
         }
         override fun onServiceDisconnected(name: ComponentName) {
             pipelineService = null
+            isBound = false
             viewModel.onServiceConnected(false)
         }
     }
@@ -102,6 +120,19 @@ class MainActivity : ComponentActivity() {
                     onResetCounters = { pipelineService?.resetStatsCounters() },
                     onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
                     driverInstalled = UsbHotplugReceiver.isDriverInstalled(this@MainActivity),
+                    onExit = {
+                        // exit() blocks (bounded) until the service has actually released
+                        // its sockets/clients, so it's safe to unbind and finish right
+                        // after it returns rather than racing the async cleanup.
+                        pipelineService?.exit()
+                        if (isBound) {
+                            unbindService(connection)
+                            isBound = false
+                        }
+                        pipelineService = null
+                        finishAffinity()
+                        android.os.Process.killProcess(android.os.Process.myPid())
+                    },
                 )
             }
         }
@@ -109,7 +140,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        unbindService(connection)
+        if (isBound) {
+            unbindService(connection)
+            isBound = false
+        }
     }
 }
 
@@ -140,6 +174,7 @@ private fun AdsbScaffold(
     onResetCounters: () -> Unit,
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
     driverInstalled: Boolean,
+    onExit: () -> Unit,
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -280,6 +315,7 @@ private fun AdsbScaffold(
                                 restoreState = true
                             }
                         },
+                        onExit = onExit,
                     )
                 }
                 // A sub-screen of Settings, deliberately not an AdsbDestination entry —

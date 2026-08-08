@@ -48,6 +48,9 @@ class RouteEnrichment(private val cacheDao: EnrichmentCacheDao) {
         return route
     }
 
+    /** Releases the underlying HTTP engine's connection pool/threads. */
+    fun close() = client.close()
+
     companion object {
         private const val CACHE_TTL_MS = 24 * 3600 * 1000L
     }

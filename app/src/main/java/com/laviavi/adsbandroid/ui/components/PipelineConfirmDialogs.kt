@@ -32,3 +32,15 @@ fun ReconnectConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** Confirms before fully exiting — stronger than Stop: releases every resource and closes the app. */
+@Composable
+fun ExitConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Exit the app?") },
+        text = { Text("The receiver stops, every open connection closes, and the app closes completely.") },
+        confirmButton = { TextButton(onClick = { onDismiss(); onConfirm() }) { Text("Exit") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

@@ -31,6 +31,7 @@ import com.laviavi.adsbandroid.offline.ConfigurableTileDownloader
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.laviavi.adsbandroid.ui.MainViewModel
+import com.laviavi.adsbandroid.ui.components.ExitConfirmDialog
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 
 private val GPS_REFRESH_OPTIONS = listOf(
@@ -62,13 +63,15 @@ fun SettingsScreen(
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
     onRequestLocationPermission: () -> Unit = {},
     onBack: () -> Unit = {},
+    onExit: () -> Unit = {},
 ) {
     val config by viewModel.config.collectAsStateWithLifecycle()
     val gainOptions by viewModel.gainOptions.collectAsStateWithLifecycle()
     SettingsScreenContent(
         config, driverInstalled, gainOptions, onConfigChange,
         onOpenOfflineMaps = onOpenOfflineMaps, onUpdateGps = onUpdateGps,
-        onRequestLocationPermission = onRequestLocationPermission, onBack = onBack, modifier = modifier,
+        onRequestLocationPermission = onRequestLocationPermission, onBack = onBack,
+        onExit = onExit, modifier = modifier,
     )
 }
 
@@ -83,6 +86,7 @@ private fun SettingsScreenContent(
     onBack: () -> Unit = {},
     onOpenOfflineMaps: () -> Unit = {},
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
+    onExit: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.ROOT) }
@@ -153,6 +157,7 @@ private fun SettingsScreenContent(
                     OfflineTileSourceSection(config, onConfigChange)
                     DataSection(config, onConfigChange)
                     AboutSection()
+                    ExitSection(onExit)
                 }
                 SettingsPage.TUNER -> TunerPage(config, gainOptions, onConfigChange)
             }
@@ -585,6 +590,32 @@ private fun AboutSection() {
             style = MaterialTheme.typography.bodySmall,
             color = AdsbColors.TextSecondary,
         )
+    }
+}
+
+/**
+ * Fully releases the receiver (USB source, enrichment HTTP clients, GPS
+ * updates, loggers) and closes the app — a stronger stop than Stop/Reconnect,
+ * which leave the app running and ready to restart.
+ */
+@Composable
+private fun ExitSection(onExit: () -> Unit) {
+    var confirm by remember { mutableStateOf(false) }
+    SettingsSection("Exit", "Fully stops the receiver and closes the app.") {
+        Button(
+            onClick = { confirm = true },
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AdsbColors.Error,
+                contentColor = AdsbColors.OnPrimary,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Exit app")
+        }
+    }
+    if (confirm) {
+        ExitConfirmDialog(onConfirm = onExit, onDismiss = { confirm = false })
     }
 }
 

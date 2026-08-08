@@ -117,7 +117,11 @@ class PipelineService : Service() {
     private var hadErrorSinceLastRunning = false
     private val sourceWatchdog = SourceWatchdog(serviceScope) {
         ErrorLog.warn("No active source for ${currentConfig.sourceWatchdogTimeoutMinutes} min - stopping to save battery")
+        releaseResources()
+        ServiceCompat.stopForeground(this@PipelineService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        _shutdownRequested.value = true
         stopSelf()
+        serviceScope.cancel()
     }
 
     private var pipelineJob: Job? = null
@@ -191,6 +195,18 @@ class PipelineService : Service() {
      */
     private val _sessionMaxRangeNm = MutableStateFlow<Double?>(null)
     val sessionMaxRangeNm: StateFlow<Double?> = _sessionMaxRangeNm.asStateFlow()
+
+    /**
+     * True once the idle-source watchdog has fully released every resource
+     * this service holds and stopped itself. [Service.stopSelf] alone does
+     * not destroy a service that is still bound — and `MainActivity` stays
+     * bound for as long as it's alive, not just while in the foreground — so
+     * without an explicit signal the "stopped" service would sit inert but
+     * still resident, still holding its binding, indefinitely. MainActivity
+     * observes this to unbind once it fires.
+     */
+    private val _shutdownRequested = MutableStateFlow(false)
+    val shutdownRequested: StateFlow<Boolean> = _shutdownRequested.asStateFlow()
 
     private val _config = MutableStateFlow(AppConfig())
     val config: StateFlow<AppConfig> = _config.asStateFlow()
@@ -460,21 +476,51 @@ class PipelineService : Service() {
         _bestRangeEver.value = record
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        unregisterReceiver(hotplugReceiver)
+    /**
+     * Full, blocking-safe teardown of everything this service holds: the active
+     * pipeline session, GPS updates, the hotplug receiver, every logger, and the
+     * three enrichment classes' HTTP clients (previously never explicitly closed
+     * — their ktor engines just leaked until the process died). Shared by
+     * [onDestroy], the idle-source watchdog, and [exit] so there is exactly one
+     * place that has to remember everything that needs releasing.
+     */
+    private suspend fun releaseResources() {
+        runCatching { unregisterReceiver(hotplugReceiver) }
         locationProvider.stopUpdates()
-        // Close the driver socket before the scope dies. Cancelling the scope first
-        // strands the close, and rtl_tcp keeps the USB interface claimed for as long
-        // as a client is attached — which is what left the dongle unopenable until
-        // the driver app was force-stopped by hand. Blocking is a socket close.
+        pipelineJob?.cancelAndJoin()
+        pipelineJob = null
+        // Close the driver socket with the scope still alive — cancelling the scope
+        // first strands the close, and rtl_tcp keeps the USB interface claimed for as
+        // long as a client is attached, which is what left the dongle unopenable
+        // until the driver app was force-stopped by hand.
         val src = currentSource
         currentSource = null
-        runBlocking { withTimeoutOrNull(500) { runCatching { src?.close() } } }
-        serviceScope.cancel()
+        withTimeoutOrNull(500) { runCatching { src?.close() } }
         rawLogger.close()
         performanceCsvLogger.close()
         coverageCsvLogger.close()
+        runCatching { routeEnrichment.close() }
+        runCatching { aircraftMetaEnrichment.close() }
+        runCatching { flightAwareEnrichment.close() }
+    }
+
+    /**
+     * User-triggered full exit (Settings → Exit app). Releases every resource
+     * this service holds, same as the idle watchdog, then stops the service.
+     * Blocks the caller (bounded) so it can safely unbind and finish the
+     * Activity right after this returns, instead of racing the async cleanup.
+     */
+    fun exit() {
+        runBlocking { withTimeoutOrNull(2_000) { releaseResources() } }
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        serviceScope.cancel()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        runBlocking { withTimeoutOrNull(500) { releaseResources() } }
+        serviceScope.cancel()
     }
 
     /** Requests one fresh (never cached) high-accuracy fix; applied via [onGpsFix] when it arrives. */
