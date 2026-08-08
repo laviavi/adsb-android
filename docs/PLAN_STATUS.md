@@ -1890,3 +1890,78 @@ below About): a red "Exit app" button behind a new `ExitConfirmDialog`
 
 Full suite: 400 core + 84 app tests, 0 failures; debug APK builds. Version
 bumped to v1.6.7 (`versionCode` 22) before this build, then released.
+
+## 37. Shutdown-race fix, POST_NOTIFICATIONS request, Exit in Traffic overflow (2026-08-08)
+
+Follow-up to §36, after Avi asked whether the app truly stops everything on
+Exit. Full fact-based investigation (grep + line-by-line trace, no
+speculation) is preserved in full in the plan file used for this turn;
+summary of what it found and fixed:
+
+**Root-caused why no notification is ever visible.** `AndroidManifest.xml`
+declares `POST_NOTIFICATIONS` but it is never requested at runtime anywhere
+in the app (grepped `app/src/main/java` — zero hits outside the manifest).
+On API 33+ (`targetSdk` 35), an unrequested runtime permission means every
+`notify()` call — the ongoing receiver-status notification included — is
+silently dropped, no crash, no sign to the user. The foreground service
+still runs fully regardless (notification visibility and foreground-service
+privilege are independent), so this explained the *missing notification*,
+not by itself any battery/heat symptom.
+
+- **`MainActivity.kt`**: added a `notificationPermissionLauncher`
+  (`ActivityResultContracts.RequestPermission()`) fired from a
+  `LaunchedEffect(Unit)` guarded on `Build.VERSION.SDK_INT >= 33`, same
+  pattern as the existing `ACCESS_FINE_LOCATION` launcher just above it.
+
+**Found and fixed a real shutdown-ordering bug.**
+`PipelineService.releaseResources()` called `pipelineJob?.cancelAndJoin()`
+with no timeout of its own, inside the same outer `withTimeoutOrNull` as the
+socket-close step after it. `NetworkSource.readSamples()`
+(`core/receiver/.../NetworkSource.kt:64-68`) wraps a plain blocking Java
+`InputStream.read()`, which coroutine cancellation cannot interrupt — only
+its own 3s socket timeout (`RtlSdrDefaults.IQ_READ_TIMEOUT_MS`) can. `exit()`
+gave the whole function 2s, `onDestroy()` only 500ms — both shorter than
+that worst case — so a mid-read pipeline at the moment of Exit could make
+the outer timeout fire *before* `releaseResources()` ever reached the
+socket-close line, skipping it (the fallback via the pipeline's own retry
+loop catch block doesn't rescue this either — `cancelAndJoin()`'s `cancel()`
+already fired, and `withContext` on an already-cancelled Job throws instead
+of running). Process death from `killProcess()` still forces the socket
+closed at the OS level shortly after regardless, so this was an ungraceful
+~2s delay, not indefinite continued operation — but a real bug.
+
+- **`PipelineService.kt`**: `releaseResources()` restructured to the
+  standard Kotlin coroutines "must-run cleanup" idiom —
+  `withTimeoutOrNull(1_500) { pipelineJob?.cancelAndJoin() }` inside a `try`,
+  with the socket-close/logger-close/HTTP-client-close block moved into a
+  `finally { withContext(NonCancellable) { ... } }`. `finally` blocks always
+  run in Kotlin coroutines regardless of how the `try` exited (including
+  cancellation), and `NonCancellable` is specifically immune to ambient
+  cancellation from an enclosing timeout — together these guarantee the
+  actual cleanup always completes, not just "usually." The now-redundant
+  outer `withTimeoutOrNull(2_000)`/`withTimeoutOrNull(500)` wrappers in
+  `exit()`/`onDestroy()` were removed — `releaseResources()` now bounds and
+  guarantees itself internally.
+
+**Exit app added to Traffic's three-dot menu**, not just Settings.
+`LiveTopBar` (`ui/text/LiveScreen.kt`) gained an `onExit: () -> Unit` param,
+a new `showExitConfirm` local state, an "Exit app" `DropdownMenuItem` in the
+existing overflow menu (alongside Reconnect/Reset counters), and reuses the
+same `ExitConfirmDialog` already built for Settings — threaded
+`TrafficScreen` → `MainActivity`'s existing `onExit` (already wired to
+Settings; this is a second entry point to the identical callback, not a
+new implementation).
+
+What remains genuinely unverifiable from this repo, stated as such rather
+than guessed at: the RTL-SDR driver app (`marto.rtl_tcp_andro`) is a
+separate third-party APK not in this repository. If it keeps the USB device
+held/streaming after adsb-android's process dies — which this project's own
+comments describe as observed, empirical behavior from past debugging, not
+something re-verifiable by reading code here — that would fully explain
+sustained heat/battery drain, and no change on adsb-android's side can
+prevent it.
+
+Full suite: 400 core + 84 app tests, 0 failures (no regressions — this is
+Service lifecycle + Compose wiring, no new pure logic to unit-test); debug
+APK builds. Version bumped to v1.6.8 (`versionCode` 23) before this build,
+then released.

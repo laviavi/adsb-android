@@ -48,6 +48,7 @@ fun TrafficScreen(
     onResetCounters: () -> Unit,
     onClearHistory: () -> Unit,
     onShareHistory: () -> Unit,
+    onExit: () -> Unit,
 ) {
     val history by viewModel.history.collectAsStateWithLifecycle()
     val visits by viewModel.visits.collectAsStateWithLifecycle()
@@ -66,6 +67,7 @@ fun TrafficScreen(
             onStop = onStop,
             onReconnect = onReconnect,
             onResetCounters = onResetCounters,
+            onExit = onExit,
         )
 
         TabRow(

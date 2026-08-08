@@ -59,10 +59,12 @@ fun LiveTopBar(
     onStop: () -> Unit,
     onReconnect: () -> Unit,
     onResetCounters: () -> Unit,
+    onExit: () -> Unit,
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showStopConfirm by remember { mutableStateOf(false) }
     var showReconnectConfirm by remember { mutableStateOf(false) }
+    var showExitConfirm by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -133,6 +135,10 @@ fun LiveTopBar(
                     text = { Text("Reset counters") },
                     onClick = { showOverflowMenu = false; onResetCounters() },
                 )
+                DropdownMenuItem(
+                    text = { Text("Exit app") },
+                    onClick = { showOverflowMenu = false; showExitConfirm = true },
+                )
             }
         }
     }
@@ -142,6 +148,9 @@ fun LiveTopBar(
     }
     if (showReconnectConfirm) {
         ReconnectConfirmDialog(onConfirm = onReconnect, onDismiss = { showReconnectConfirm = false })
+    }
+    if (showExitConfirm) {
+        ExitConfirmDialog(onConfirm = onExit, onDismiss = { showExitConfirm = false })
     }
 }
 

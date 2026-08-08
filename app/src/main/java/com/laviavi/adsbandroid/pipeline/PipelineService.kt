@@ -487,31 +487,49 @@ class PipelineService : Service() {
     private suspend fun releaseResources() {
         runCatching { unregisterReceiver(hotplugReceiver) }
         locationProvider.stopUpdates()
-        pipelineJob?.cancelAndJoin()
-        pipelineJob = null
-        // Close the driver socket with the scope still alive — cancelling the scope
-        // first strands the close, and rtl_tcp keeps the USB interface claimed for as
-        // long as a client is attached, which is what left the dongle unopenable
-        // until the driver app was force-stopped by hand.
-        val src = currentSource
-        currentSource = null
-        withTimeoutOrNull(500) { runCatching { src?.close() } }
-        rawLogger.close()
-        performanceCsvLogger.close()
-        coverageCsvLogger.close()
-        runCatching { routeEnrichment.close() }
-        runCatching { aircraftMetaEnrichment.close() }
-        runCatching { flightAwareEnrichment.close() }
+        try {
+            // Bounded on its own: NetworkSource.readSamples() wraps a plain blocking
+            // Java InputStream.read() — coroutine cancellation cannot interrupt it,
+            // only its own 3s socket timeout (RtlSdrDefaults.IQ_READ_TIMEOUT_MS) can.
+            // A caller-imposed outer timeout shorter than that (exit() used to give
+            // this whole function 2s, onDestroy() only 500ms) could expire while this
+            // join is still waiting on a mid-read pipeline, cancelling this function
+            // before it ever reached the close below — the finally block is what
+            // guarantees that no longer matters.
+            withTimeoutOrNull(1_500) { pipelineJob?.cancelAndJoin() }
+        } finally {
+            // NonCancellable: must run to completion even if this coroutine has
+            // already been cancelled by an ambient/caller timeout — otherwise the
+            // socket close, and everything after it, can be silently skipped.
+            // Closing the driver socket while still able to run suspend calls
+            // matters: rtl_tcp keeps the USB interface claimed for as long as a
+            // client is attached, which is what left the dongle unopenable until
+            // the driver app was force-stopped by hand.
+            withContext(NonCancellable) {
+                pipelineJob = null
+                val src = currentSource
+                currentSource = null
+                withTimeoutOrNull(500) { runCatching { src?.close() } }
+                rawLogger.close()
+                performanceCsvLogger.close()
+                coverageCsvLogger.close()
+                runCatching { routeEnrichment.close() }
+                runCatching { aircraftMetaEnrichment.close() }
+                runCatching { flightAwareEnrichment.close() }
+            }
+        }
     }
 
     /**
-     * User-triggered full exit (Settings → Exit app). Releases every resource
-     * this service holds, same as the idle watchdog, then stops the service.
-     * Blocks the caller (bounded) so it can safely unbind and finish the
-     * Activity right after this returns, instead of racing the async cleanup.
+     * User-triggered full exit (Settings/Traffic → Exit app). Releases every
+     * resource this service holds, same as the idle watchdog, then stops the
+     * service. Blocks the caller until [releaseResources] actually finishes
+     * (its own internal bounds and NonCancellable guarantee this can't hang
+     * indefinitely) so it's safe to unbind and finish the Activity right
+     * after this returns, instead of racing the async cleanup.
      */
     fun exit() {
-        runBlocking { withTimeoutOrNull(2_000) { releaseResources() } }
+        runBlocking { releaseResources() }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
         serviceScope.cancel()
@@ -519,7 +537,7 @@ class PipelineService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        runBlocking { withTimeoutOrNull(500) { releaseResources() } }
+        runBlocking { releaseResources() }
         serviceScope.cancel()
     }
 

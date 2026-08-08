@@ -203,6 +203,18 @@ private fun AdsbScaffold(
         locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
+    // POST_NOTIFICATIONS is declared in the manifest but, on API 33+, is a runtime
+    // permission like the location one above — without requesting it, every
+    // notification this app posts (the ongoing receiver status one included) is
+    // silently dropped with no visible sign to the user that it even tried.
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     NavigationSuiteScaffold(
         navigationSuiteItems = {
             AdsbDestination.entries.forEach { dest ->
@@ -277,6 +289,7 @@ private fun AdsbScaffold(
                         onResetCounters = onResetCounters,
                         onClearHistory = onClearHistory,
                         onShareHistory = onShareHistory,
+                        onExit = onExit,
                     )
                 }
                 composable(AdsbDestination.MAP.route) {
