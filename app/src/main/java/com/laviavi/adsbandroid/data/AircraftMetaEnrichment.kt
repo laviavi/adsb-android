@@ -10,22 +10,13 @@ import io.ktor.client.request.get
 import io.ktor.client.request.headers
 import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 private const val TAG = "AircraftMetaEnrich"
-
-/**
- * Trims, and treats the literal string `Null` as absent.
- *
- * hexdb.io returns `"Null"` rather than omitting the field when it has no
- * registered owner, which put an operator named "Null" on the Live list. Every
- * field parsed from an upstream response goes through this — the spelling varies
- * by source and none of them mean anything but "we don't know".
- */
-private fun String?.present(): String? =
-    this?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 
 /**
  * Was 30 days. A negative result (all three sources returned nothing — a
@@ -129,6 +120,26 @@ internal fun mapAdsbdbFields(icao: String, ac: AdsbdbAircraftFields): AircraftMe
 }
 
 /**
+ * Combines results from every source queried for one ICAO: first non-null
+ * value per field wins, in the sources' priority order (hexdb > OpenSky >
+ * adsbdb) — a partial result from one source no longer hides a field only a
+ * later source had. Pure so it's directly testable without a network call.
+ */
+internal fun mergeSources(icao: String, vararg results: AircraftMeta?): AircraftMeta? {
+    val present = results.filterNotNull()
+    if (present.isEmpty()) return null
+    return AircraftMeta(
+        icao = icao,
+        registration = present.firstNotNullOfOrNull { it.registration },
+        manufacturer = present.firstNotNullOfOrNull { it.manufacturer },
+        model = present.firstNotNullOfOrNull { it.model },
+        typeCode = present.firstNotNullOfOrNull { it.typeCode },
+        owner = present.firstNotNullOfOrNull { it.owner },
+        source = present.map { it.source }.distinct().joinToString("+"),
+    ).takeUnless { it.isEmpty() }
+}
+
+/**
  * Per-ICAO metadata from three public APIs: hexdb.io → OpenSky → adsbdb.
  * For US aircraft (ICAO prefix A), FAA local CSV is tried first.
  * Results cached in Room for 30 days.
@@ -176,19 +187,20 @@ class AircraftMetaEnrichment(
     /** Releases the underlying HTTP engine's connection pool/threads. */
     fun close() = client.close()
 
-    // US: hexdb.io → OpenSky
-    private suspend fun lookupUs(icao: String): AircraftMeta? {
-        fetchHexdb(icao)?.let { return it }
-        fetchOpenSky(icao)?.let { return it }
-        return null
+    // US: hexdb.io + OpenSky, queried in parallel and merged field-by-field —
+    // one source having a registration doesn't mean it also has the owner.
+    private suspend fun lookupUs(icao: String): AircraftMeta? = coroutineScope {
+        val hexdb = async { fetchHexdb(icao) }
+        val opensky = async { fetchOpenSky(icao) }
+        mergeSources(icao, hexdb.await(), opensky.await())
     }
 
-    // Non-US: hexdb.io → OpenSky → adsbdb
-    private suspend fun lookupIntl(icao: String): AircraftMeta? {
-        fetchHexdb(icao)?.let { return it }
-        fetchOpenSky(icao)?.let { return it }
-        fetchAdsbdb(icao)?.let { return it }
-        return null
+    // Non-US: hexdb.io + OpenSky + adsbdb, same parallel-merge approach.
+    private suspend fun lookupIntl(icao: String): AircraftMeta? = coroutineScope {
+        val hexdb = async { fetchHexdb(icao) }
+        val opensky = async { fetchOpenSky(icao) }
+        val adsbdb = async { fetchAdsbdb(icao) }
+        mergeSources(icao, hexdb.await(), opensky.await(), adsbdb.await())
     }
 
     private suspend fun fetchHexdb(icao: String): AircraftMeta? = runCatching {

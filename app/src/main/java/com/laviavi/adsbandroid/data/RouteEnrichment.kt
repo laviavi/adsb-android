@@ -20,8 +20,8 @@ private data class AdsbdbAirport(@SerialName("icao_code") val icaoCode: String? 
 
 /**
  * Route lookup via adsbdb.com's free public API (no key required) — a hobbyist-friendly
- * source instead of scraping FlightAware's website. Results are cached in [EnrichmentCacheDao]
- * for 24h; one source only, add more via the same DAO if ever needed.
+ * source instead of scraping FlightAware's website. Results (including negative ones)
+ * cached in [EnrichmentCacheDao]; one source only, add more via the same DAO if ever needed.
  */
 class RouteEnrichment(private val cacheDao: EnrichmentCacheDao) {
 
@@ -39,8 +39,8 @@ class RouteEnrichment(private val cacheDao: EnrichmentCacheDao) {
         val route = runCatching {
             val resp: AdsbdbCallsignResponse = client.get("https://api.adsbdb.com/v0/callsign/$key").body()
             val fr = resp.response?.flightroute ?: return@runCatching null
-            val origin = fr.origin?.icaoCode
-            val dest = fr.destination?.icaoCode
+            val origin = fr.origin?.icaoCode.present()
+            val dest = fr.destination?.icaoCode.present()
             if (origin != null && dest != null) "$origin-$dest" else null
         }.getOrNull()
 
@@ -52,6 +52,9 @@ class RouteEnrichment(private val cacheDao: EnrichmentCacheDao) {
     fun close() = client.close()
 
     companion object {
-        private const val CACHE_TTL_MS = 24 * 3600 * 1000L
+        // Was 24h. A transient adsbdb hiccup used to lock in a negative result for a
+        // full day with no way to force a recheck — same class of problem
+        // AircraftMetaEnrichment's TTL already got fixed for (30 days -> 2h).
+        private const val CACHE_TTL_MS = 2 * 3600 * 1000L
     }
 }

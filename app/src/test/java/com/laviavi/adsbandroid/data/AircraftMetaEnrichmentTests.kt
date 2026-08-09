@@ -147,3 +147,38 @@ class HexdbFieldMappingTests {
         assertEquals("Boeing 737MAX 8", meta!!.typeDisplay())
     }
 }
+
+/**
+ * Regression coverage for moving off "first source wins": a source with only
+ * a registration used to permanently hide a later source's owner, even
+ * though nothing about the first source's result said the owner was
+ * genuinely unknown — it just hadn't been asked.
+ */
+class MergeSourcesTests {
+
+    @Test fun `a field missing from the first source is filled in by the second`() {
+        val hexdb = AircraftMeta("C084A3", registration = "C-GYFY", manufacturer = null, model = null, typeCode = null, owner = null, source = "hexdb")
+        val adsbdb = AircraftMeta("C084A3", registration = null, manufacturer = "Airbus", model = "A321", typeCode = "A321", owner = "Air Canada Rouge", source = "adsbdb")
+        val merged = mergeSources("C084A3", hexdb, adsbdb)
+        assertNotNull(merged)
+        assertEquals("C-GYFY", merged!!.registration, "earlier source's field is kept")
+        assertEquals("Air Canada Rouge", merged.owner, "later source fills in what the earlier one lacked")
+        assertEquals("hexdb+adsbdb", merged.source)
+    }
+
+    @Test fun `the earlier source's value wins when both have the same field`() {
+        val hexdb = AircraftMeta("C084A3", registration = "C-GYFY", manufacturer = null, model = null, typeCode = null, owner = null, source = "hexdb")
+        val opensky = AircraftMeta("C084A3", registration = "WRONG-REG", manufacturer = null, model = null, typeCode = null, owner = null, source = "opensky")
+        val merged = mergeSources("C084A3", hexdb, opensky)
+        assertEquals("C-GYFY", merged!!.registration)
+    }
+
+    @Test fun `all sources null yields no result`() {
+        assertNull(mergeSources("C084A3", null, null, null))
+    }
+
+    @Test fun `every source empty (all fields null) still yields no result`() {
+        val empty = AircraftMeta("C084A3", null, null, null, null, null, "hexdb")
+        assertNull(mergeSources("C084A3", empty, null))
+    }
+}

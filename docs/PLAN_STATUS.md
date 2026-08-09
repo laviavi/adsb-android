@@ -2155,3 +2155,87 @@ this is Compose UI + Android `Paint` wiring, not unit-testable without
 Robolectric/instrumentation). Debug APK built, v1.6.13 (`versionCode` 28),
 added to `dist/`. Not yet verified on-device — pending Avi confirming the
 zoom-step fix actually resolves the original complaint.
+
+## 43. Enrichment: fix the literal-"null" bug class-wide, merge meta sources instead of first-wins (2026-08-09)
+
+Screenshot showed `C01286`/`C040F9`/`C0001C` (Canadian aircraft) with type
+line "Null" and route "null → null". Root-caused: `FlightAwareEnrichment.kt`'s
+`parse()` (§ investigation this session) walks FlightAware's raw JSON tree by
+hand; when a field is present but JSON `null` (not absent), kotlinx.serialization's
+`JsonNull.content` is the literal string `"null"`, which the old `?: ""`
+fallback never caught (a present key never hits the fallback). Avi then asked
+for "complete data collection," not just this one patch — two Explore
+surveys of the whole enrichment pipeline found the same bug class in a
+second file and a real completeness gap unrelated to any bug.
+
+**Shared the `.present()` filter everywhere.** New file
+`data/StringPresence.kt`: `.present()` (trims, treats literal `"null"`
+case-insensitive as absent) moved here from its private copy inside
+`AircraftMetaEnrichment.kt` (same logic, now shared). `IcaoLookup.kt`'s
+duplicate `presentOrNull()` deleted, its 2 call sites use the shared one.
+`FlightAwareEnrichment.kt`'s `parse()` now runs every extracted field
+(origin/destination/callsign/airline name+icao/typeCode/manufacturer/model,
+plus the `flightStatus` check that gates which flight record is picked)
+through `.present()` before use — `titleCase("null")` can no longer produce
+`"Null"`. `RouteEnrichment.kt`'s `icaoCode` extraction filtered too
+(defensive; adsbdb hasn't been observed doing this, but now can't leak it if
+it starts). New tests: `StringPresenceTests.kt` (4), and
+`FlightAwareEnrichmentNullFieldTests` in `FlightAwareEnrichmentTests.kt` (3)
+proving a JSON-null origin/destination/aircraft field no longer produces the
+string `"null"`/`"Null"`.
+
+**`AircraftMetaEnrichment` merges sources instead of stopping at the first
+one that returns anything.** `lookupUs`/`lookupIntl` used to `return` the
+first non-null result from hexdb → OpenSky → (adsbdb) — a source with only a
+registration permanently hid a later source's owner/type, since the first
+one "succeeded." Rewrote both to fetch every applicable source **in
+parallel** (`coroutineScope` + `async`, so latency stays ~max(sources) not
+sum — this already runs off the decode path on `Dispatchers.IO`, never
+blocks decoding) and combine field-by-field via a new pure, testable
+top-level `mergeSources()`: first non-null value per field wins in the
+existing priority order (hexdb > OpenSky > adsbdb), `source` becomes a
+joined `"hexdb+adsbdb"`-style label (confirmed only used for the `"none"`
+negative-cache sentinel, never shown in UI — safe to change). Deliberate
+tradeoff: always queries every source now instead of stopping early, more
+requests per aircraft against free hobbyist APIs — accepted, this is "try
+harder once" per aircraft (2h re-cache), not continuous polling. New
+`MergeSourcesTests.kt`-equivalent (`MergeSourcesTests` class in
+`AircraftMetaEnrichmentTests.kt`, 4 tests) proves two partial sources
+combine into one complete result and same-field conflicts keep the
+higher-priority source's value.
+
+**`RouteEnrichment`'s negative-cache TTL: 24h → 2h**, matching
+`AircraftMetaEnrichment`'s already-fixed convention (§31, 30 days → 2h) — a
+transient adsbdb hiccup no longer locks out a retry for a full day.
+
+**Two gaps investigated, not fixed this round, findings recorded for a
+follow-up decision:**
+- Callsign-less aircraft can't get an adsbdb route-by-callsign lookup
+  (protocol-level — adsbdb's `/v0/aircraft/{hex}` genuinely has no route
+  fields, confirmed live) — but **already covered in practice**:
+  `FlightAwareEnrichment`'s existing ident fallback (callsign → registration
+  → bare ICAO, `PipelineService.kt:1115-1117`) was verified live against
+  `flightaware.com/live/flight/CFHAJ` (bare registration, no callsign) and
+  returned a real `trackpollBootstrap` payload with route data. Nothing to build.
+- Non-US offline registration coverage is genuinely thin: `Registration.kt`
+  is algorithmically US-only by construction (most countries' Mode-S
+  addresses aren't invertible the way FAA N-numbers are — needs a lookup
+  table, not code); the bundled `app/src/main/assets/icao_db.json` is a
+  **20-entry placeholder** (verified by reading it — no Canadian entries at
+  all, confirming the screenshot's Canadian registrations came from a live
+  network lookup, not this file). Best fix path identified but not started:
+  regenerate `icao_db.json` from OpenSky Network's bulk aircraft database
+  (`opensky-network.org/datasets/metadata/aircraftDatabase.csv`, confirmed
+  live, 94.5 MB, free, no key — same provider already queried live in
+  `AircraftMetaEnrichment.fetchOpenSky()`), same `tools/gen_X.py` pattern as
+  `Airlines.kt`. License needs confirming before bundling (likely CC BY-NC,
+  unverified). `tar1090-db` (the readsb/tar1090 ecosystem's usual DB)
+  considered and set aside — no declared license on its GitHub repo.
+  Writing additional scrapers (FlightRadar24, RadarBox, per-country
+  registries) considered and rejected: aggressively bot-protected or a
+  large per-country maintenance burden for what the OpenSky bulk import
+  already covers with a documented, already-trusted source.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, 11 new tests, 0
+failures. `:app:assembleDebug` succeeds. Not yet version-bumped, built into
+an APK, or committed — pending Avi's go-ahead.

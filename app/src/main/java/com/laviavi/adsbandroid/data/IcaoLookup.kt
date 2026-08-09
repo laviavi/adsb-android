@@ -22,19 +22,11 @@ object IcaoLookup {
             val icao = key.uppercase()
             val e    = obj.getJSONObject(key)
             result[icao] = IcaoEntry(
-                registration = e.optString("reg").presentOrNull(),
-                operator     = e.optString("op").presentOrNull(),
-                aircraftType = e.optString("type").presentOrNull(),
+                registration = e.optString("reg").present(),
+                operator     = e.optString("op").present(),
+                aircraftType = e.optString("type").present(),
             )
         }
         return result
     }
-
-    /**
-     * The source database spells a missing field as the literal string `Null` in
-     * some rows, which reached the Live list as an operator named "Null". Absent is
-     * absent however it is spelled.
-     */
-    private fun String.presentOrNull(): String? =
-        trim().takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 }

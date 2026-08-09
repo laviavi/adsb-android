@@ -225,22 +225,22 @@ internal fun parse(html: String): FaResult? {
     val data = runCatching { json.parseToJsonElement(block).jsonObject }.getOrNull() ?: return null
     val flights = data["flights"]?.jsonObject ?: return null
     val flight = flights.values.firstOrNull {
-        (it.jsonObject["flightStatus"]?.jsonPrimitive?.content ?: "").isNotBlank()
+        !(it.jsonObject["flightStatus"]?.jsonPrimitive?.content).present().isNullOrBlank()
     }?.jsonObject ?: return null
 
-    val origin      = flight["origin"]?.jsonObject?.get("iata")?.jsonPrimitive?.content?.trim() ?: ""
-    val destination = flight["destination"]?.jsonObject?.get("iata")?.jsonPrimitive?.content?.trim() ?: ""
-    val callsign    = flight["displayIdent"]?.jsonPrimitive?.content?.trim() ?: ""
+    val origin      = flight["origin"]?.jsonObject?.get("iata")?.jsonPrimitive?.content.present() ?: ""
+    val destination = flight["destination"]?.jsonObject?.get("iata")?.jsonPrimitive?.content.present() ?: ""
+    val callsign    = flight["displayIdent"]?.jsonPrimitive?.content.present() ?: ""
 
     val airline     = flight["airline"]?.jsonObject
-    val airlineName = cleanAirlineName(airline?.get("fullName")?.jsonPrimitive?.content)
-    val airlineIcao = airline?.get("icao")?.jsonPrimitive?.content?.trim()?.uppercase() ?: ""
+    val airlineName = cleanAirlineName(airline?.get("fullName")?.jsonPrimitive?.content.present())
+    val airlineIcao = airline?.get("icao")?.jsonPrimitive?.content.present()?.uppercase() ?: ""
 
     val aircraft    = flight["aircraft"]?.jsonObject
-    val typeCode    = aircraft?.get("type")?.jsonPrimitive?.content?.trim()?.uppercase() ?: ""
+    val typeCode    = aircraft?.get("type")?.jsonPrimitive?.content.present()?.uppercase() ?: ""
     val typeDetails = aircraft?.get("typeDetails")?.jsonObject
-    val manufacturer = titleCase(typeDetails?.get("manufacturer")?.jsonPrimitive?.content)
-    val model        = titleCase(typeDetails?.get("model")?.jsonPrimitive?.content)
+    val manufacturer = titleCase(typeDetails?.get("manufacturer")?.jsonPrimitive?.content.present())
+    val model        = titleCase(typeDetails?.get("model")?.jsonPrimitive?.content.present())
 
     return FaResult(origin, destination, airlineName, airlineIcao, callsign, typeCode, manufacturer, model)
 }
