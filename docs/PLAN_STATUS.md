@@ -2104,5 +2104,5 @@ real dark tiles, not an inverted OSM — this is the actual fix for the
 complaint, not just another option next to the same problem.
 
 `:core:receiver:test` + `:app:testDebugUnitTest` pass, unchanged counts (no
-new testable logic — this is static enum data). Not built into an APK or
-version-bumped; not pushed.
+new testable logic — this is static enum data). Version bumped to v1.6.12
+(`versionCode` 27), debug APK built and added to `dist/`. Not pushed.
