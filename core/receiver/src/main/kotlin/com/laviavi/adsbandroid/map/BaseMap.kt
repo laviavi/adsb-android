@@ -27,4 +27,24 @@ enum class BaseMap(
         "Esri, Maxar, Earthstar Geographics",
         labelUrlTemplate = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     ),
+    ESRI_STREET(
+        "Esri World Street Map",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        "Esri, HERE, Garmin, FAO, NOAA, USGS",
+    ),
+    CARTO_DARK(
+        "CARTO Dark Matter",
+        "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "© CARTO, © OpenStreetMap contributors",
+    ),
+    CARTO_VOYAGER(
+        "CARTO Voyager",
+        "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "© CARTO, © OpenStreetMap contributors",
+    ),
+    CARTO_POSITRON(
+        "CARTO Positron",
+        "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "© CARTO, © OpenStreetMap contributors",
+    ),
 }

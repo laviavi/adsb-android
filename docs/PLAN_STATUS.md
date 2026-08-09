@@ -2085,3 +2085,24 @@ contract, not something that needs empirical reproduction to trust.
 
 Full suite: 400 core + 89 app tests (2 new), 0 failures; debug APK builds.
 Version bumped to v1.6.11 (`versionCode` 26) before this build, then released.
+
+## 41. Four more base-map tile sources — CARTO + Esri Street (2026-08-09)
+
+Avi didn't like OSM's colors/layers/style. Rather than keep tuning the
+`darkTileFilter()` invert-hack (§29–30, OSM-only), added four real basemap
+styles as new `BaseMap` entries (`core/receiver/.../map/BaseMap.kt`):
+`ESRI_STREET` (Esri World Street Map, same `{z}/{y}/{x}` tile order as the
+existing `ESRI_IMAGERY`), `CARTO_DARK` (Dark Matter), `CARTO_VOYAGER`, and
+`CARTO_POSITRON` — all free, no API key, plain `{z}/{x}/{y}` XYZ raster,
+`labelUrlTemplate = null` since all four already carry their own labels.
+
+No other code changes needed: Settings' "Base map" section already renders
+`BaseMap.entries.forEach { ... }` (`SettingsScreen.kt:573`), so the four new
+options just appear. `tileFilterFor()` (`MapScreen.kt:325`) only applies the
+invert hack `if (baseMap == BaseMap.OSM)`, so `CARTO_DARK` renders as its own
+real dark tiles, not an inverted OSM — this is the actual fix for the
+complaint, not just another option next to the same problem.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, unchanged counts (no
+new testable logic — this is static enum data). Not built into an APK or
+version-bumped; not pushed.
