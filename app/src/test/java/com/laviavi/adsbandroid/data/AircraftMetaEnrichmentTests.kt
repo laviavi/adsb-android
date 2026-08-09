@@ -88,3 +88,62 @@ class AdsbdbFieldMappingTests {
         assertNull(mapAdsbdbFields("C066C4", AdsbdbAircraftFields()))
     }
 }
+
+/**
+ * Investigating "C084A3 and C02AE3 showed no registration/type/route in the
+ * Traffic list, despite running long enough that this isn't a timing issue"
+ * (screenshots, 2026-08-09). Both ICAOs have complete data on hexdb.io — the
+ * *first* source tried, before OpenSky or adsbdb are ever reached — verified
+ * live:
+ *
+ *   C084A3: {"Registration":"C-GYFY","Manufacturer":"Airbus","Type":"A321 211",
+ *            "RegisteredOwners":"Air Canada Rouge","ICAOTypeCode":"A321"}
+ *   C02AE3: {"Registration":"C-FQGG","Manufacturer":"Boeing","Type":"737MAX 8",
+ *            "RegisteredOwners":"WestJet","ICAOTypeCode":"B38M"}
+ *
+ * These tests prove `mapHexdbResponse()` — the exact function
+ * `AircraftMetaEnrichment.fetchHexdb()` runs on every meta lookup — parses
+ * this real data correctly. That rules out a parsing bug in the currently
+ * shipped code as the cause: whatever kept these two aircraft unenriched, it
+ * is not that the app can't understand hexdb.io's response for them. The
+ * remaining, unverifiable-without-device-access explanation is the 2h
+ * negative-cache TTL (`isCacheFresh`, above): if either ICAO was seen and
+ * cached as "none" earlier in the same testing session (e.g. during a
+ * transient hexdb.io hiccup, or before this evening's other fixes landed),
+ * every later sighting replays that cached null for up to 2 hours — no
+ * matter how much *more* time passes while watching it live, since the
+ * clock that matters is time-since-cache-write, not time-since-resighting.
+ */
+class HexdbFieldMappingTests {
+
+    @Test fun `C084A3 (Air Canada Rouge A321) parses to a complete result`() {
+        val resp = HexdbResponse(
+            registration = "C-GYFY",
+            manufacturer = "Airbus",
+            type = "A321 211",
+            registeredOwners = "Air Canada Rouge",
+            icaoTypeCode = "A321",
+        )
+        val meta = mapHexdbResponse("C084A3", resp)
+        assertNotNull(meta)
+        assertEquals("C-GYFY", meta!!.registration)
+        assertEquals("Airbus", meta.manufacturer)
+        assertEquals("A321 211", meta.model)
+        assertEquals("A321", meta.typeCode)
+        assertEquals("Air Canada Rouge", meta.owner)
+        assertEquals("Airbus A321 211", meta.typeDisplay())
+    }
+
+    @Test fun `C02AE3 (WestJet 737 MAX 8) parses to a complete result`() {
+        val resp = HexdbResponse(
+            registration = "C-FQGG",
+            manufacturer = "Boeing",
+            type = "737MAX 8",
+            registeredOwners = "WestJet",
+            icaoTypeCode = "B38M",
+        )
+        val meta = mapHexdbResponse("C02AE3", resp)
+        assertNotNull(meta)
+        assertEquals("Boeing 737MAX 8", meta!!.typeDisplay())
+    }
+}

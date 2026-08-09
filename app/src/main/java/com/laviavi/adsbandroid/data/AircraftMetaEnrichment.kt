@@ -69,13 +69,24 @@ fun AircraftMeta.typeDisplay(): String? {
 // ── hexdb.io response ─────────────────────────────────────────────────────────
 
 @Serializable
-private data class HexdbResponse(
+internal data class HexdbResponse(
     @SerialName("Registration")    val registration:   String? = null,
     @SerialName("Manufacturer")    val manufacturer:   String? = null,
     @SerialName("Type")            val type:           String? = null,
     @SerialName("RegisteredOwners") val registeredOwners: String? = null,
     @SerialName("ICAOTypeCode")    val icaoTypeCode:   String? = null,
 )
+
+/** Pure so the hexdb.io field mapping is directly testable without a network call. */
+internal fun mapHexdbResponse(icao: String, resp: HexdbResponse): AircraftMeta? {
+    val reg = resp.registration.present()
+    val mfr = resp.manufacturer.present()
+    val mdl = resp.type.present()
+    val own = resp.registeredOwners.present()
+    val tc  = resp.icaoTypeCode.present()?.uppercase()
+    if (reg == null && mfr == null && mdl == null) return null
+    return AircraftMeta(icao, reg, mfr, mdl, tc, own, "hexdb")
+}
 
 // ── OpenSky response ──────────────────────────────────────────────────────────
 
@@ -184,13 +195,7 @@ class AircraftMetaEnrichment(
         val resp: HexdbResponse = client.get("https://hexdb.io/api/v1/aircraft/${icao.lowercase()}") {
             headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
         }.body()
-        val reg  = resp.registration.present()
-        val mfr  = resp.manufacturer.present()
-        val mdl  = resp.type.present()
-        val own  = resp.registeredOwners.present()
-        val tc   = resp.icaoTypeCode.present()?.uppercase()
-        if (reg == null && mfr == null && mdl == null) return@runCatching null
-        AircraftMeta(icao, reg, mfr, mdl, tc, own, "hexdb")
+        mapHexdbResponse(icao, resp)
     }.getOrElse {
         Log.d(TAG, "hexdb.io error for $icao: $it")
         null

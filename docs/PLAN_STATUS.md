@@ -2045,3 +2045,43 @@ captured response shape as the fixture.
 
 Full suite: 400 core + 87 app tests (3 new), 0 failures; debug APK builds.
 Version bumped to v1.6.10 (`versionCode` 25) before this build, then released.
+
+## 40. In-flight lookup sets were plain HashSets mutated across two dispatchers (2026-08-09, v1.6.11)
+
+Investigated why C084A3 and C02AE3 (screenshots: Air Canada Rouge A321 and
+WestJet 737 MAX 8, both with complete hexdb.io data available) never got
+registration/type/route despite the session running long enough that timing
+wasn't the explanation. Ruled out a parsing bug first: extracted
+`fetchHexdb()`'s field mapping into a pure `mapHexdbResponse()` and ran it
+against both aircraft's real captured responses — both parse correctly
+(new `HexdbFieldMappingTests.kt`, 2 tests) — so the app can understand this
+data fine when it gets a chance to fetch it.
+
+**Root cause: `routeLookupInFlight`/`metaLookupInFlight` were plain
+`HashSet<String>`, mutated from two different dispatchers.** `add()` runs on
+`ReceiverRepository`'s confined dispatcher (`onAircraftUpdated`); `remove()`
+runs inside `serviceScope.launch(Dispatchers.IO) { ... }` once the async
+network call finishes — a different thread pool entirely. `java.util.HashSet`
+is explicitly documented as unsafe for concurrent modification from multiple
+threads without external synchronization. With several aircraft in view at
+once (exactly the screenshots' scenario — 3-4 simultaneous contacts, each
+independently triggering its own async lookup+removal), a `remove()` for one
+ICAO racing a concurrent `add()`/`remove()` for a different ICAO on the same
+underlying hash table could get silently lost. Once that happens, that ICAO
+stays marked "in flight" for the rest of the process's lifetime —
+`metaLookupInFlight.add(icao)` returns `false` forever after, so every future
+message for it skips re-enrichment permanently. No amount of additional time
+fixes this; only an app restart (a fresh in-memory set) does.
+
+**Fix**: both sets swapped for `ConcurrentHashMap.newKeySet<String>()` —
+lock-free, genuinely thread-safe, drop-in API-compatible
+(`add`/`remove`/`clear` all still work), and the same JDK-concurrent-collection
+pattern this codebase already uses for `PipelineStats.dfCounts`.
+
+No dedicated regression test for the race itself — concurrent-corruption bugs
+depend on precise thread interleaving and would make a flaky, not a reliable,
+test. The fix is correct by the Java Collections Framework's own documented
+contract, not something that needs empirical reproduction to trust.
+
+Full suite: 400 core + 89 app tests (2 new), 0 failures; debug APK builds.
+Version bumped to v1.6.11 (`versionCode` 26) before this build, then released.

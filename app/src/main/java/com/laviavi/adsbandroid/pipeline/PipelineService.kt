@@ -107,8 +107,19 @@ class PipelineService : Service() {
     private val routeEnrichment by lazy { RouteEnrichment(enrichmentDao) }
     private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao) }
     private val flightAwareEnrichment by lazy { FlightAwareEnrichment(serviceScope) }
-    private val routeLookupInFlight = HashSet<String>()
-    private val metaLookupInFlight  = HashSet<String>()
+    // ConcurrentHashMap-backed, not a plain HashSet: add() runs on
+    // ReceiverRepository's confined dispatcher (onAircraftUpdated), remove()
+    // runs on a Dispatchers.IO worker thread once the async lookup finishes —
+    // two different threads mutating the same set. A plain HashSet is not
+    // safe for that (java.util.HashSet's own contract requires external
+    // synchronization for concurrent modification); with several aircraft in
+    // view at once, a remove() for one ICAO could race with an add()/remove()
+    // for another and get silently lost, permanently stranding that ICAO as
+    // "in flight" — every future message for it then skips re-enrichment
+    // forever, which no amount of additional time can fix, only an app
+    // restart (a fresh set) can.
+    private val routeLookupInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val metaLookupInFlight  = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private val locationProvider by lazy { GpsLocationProvider(applicationContext) }
     private val observerPosition = ObserverPositionResolver()
