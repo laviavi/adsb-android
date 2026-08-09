@@ -38,6 +38,11 @@ class AircraftOverlay(
     var showLabels: Boolean = true
     var showGroundTraffic: Boolean = true
 
+    /** Ring appearance, driven by AppConfig's ring-style fields; defaults match the original hardcoded look. */
+    var ringColorArgb: Int = AdsbColors.Primary.toArgb()
+    var ringWidthDp: Float = 1f
+    var ringLineStyle: RingLineStyle = RingLineStyle.SOLID
+
     /** Ring radii in nautical miles, inner first. */
     var ringRadiiNm: List<Double> = emptyList()
     var ringLabels: List<String> = emptyList()
@@ -58,7 +63,6 @@ class AircraftOverlay(
     private val ringLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
         textSize = px(10f)
-        color = AdsbColors.Primary.toArgb()
     }
     private val observerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -157,13 +161,18 @@ class AircraftOverlay(
         val cx = point.x.toFloat()
         val cy = point.y.toFloat()
 
+        ringPaint.strokeWidth = px(ringWidthDp)
+        ringPaint.pathEffect = pathEffectFor(ringLineStyle)
+        ringPaint.strokeCap = if (ringLineStyle == RingLineStyle.DOTTED) Paint.Cap.ROUND else Paint.Cap.BUTT
+        ringLabelPaint.color = ringColorArgb
+
         ringRadiiNm.forEachIndexed { i, radiusNm ->
             val radiusPx = nauticalMilesToPixels(radiusNm, obs.latitude, mapView)
             if (radiusPx <= 0f) return@forEachIndexed
             // Outer rings fade, innermost strongest — scales to however many rings
             // are configured (up to AppConfig.MAX_MAP_RINGS) rather than a fixed count.
             val alpha = (0.22f - i * 0.03f).coerceAtLeast(0.08f)
-            ringPaint.color = AdsbColors.Primary.toArgb()
+            ringPaint.color = ringColorArgb
             ringPaint.alpha = (alpha * 255).roundToInt()
             canvas.drawCircle(cx, cy, radiusPx, ringPaint)
 
@@ -172,6 +181,13 @@ class AircraftOverlay(
                 canvas.drawText(label, cx + px(4f), cy - radiusPx - px(3f), ringLabelPaint)
             }
         }
+    }
+
+    /** `null` for solid (osmdroid/Canvas default); dash intervals scale with density like every other px() value here. */
+    private fun pathEffectFor(style: RingLineStyle): android.graphics.PathEffect? = when (style) {
+        RingLineStyle.SOLID -> null
+        RingLineStyle.DASHED -> android.graphics.DashPathEffect(floatArrayOf(px(8f), px(5f)), 0f)
+        RingLineStyle.DOTTED -> android.graphics.DashPathEffect(floatArrayOf(px(1f), px(6f)), 0f)
     }
 
     private fun drawObserver(canvas: Canvas, projection: org.osmdroid.views.Projection) {

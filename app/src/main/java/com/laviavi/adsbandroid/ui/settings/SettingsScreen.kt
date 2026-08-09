@@ -26,7 +26,6 @@ import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.capture.GainOptions
 import com.laviavi.adsbandroid.capture.RtlTcpGain
 import com.laviavi.adsbandroid.location.ObserverMode
-import com.laviavi.adsbandroid.map.BaseMap
 import com.laviavi.adsbandroid.offline.ConfigurableTileDownloader
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -150,9 +149,7 @@ private fun SettingsScreenContent(
                     ReceiverSection(config, driverInstalled, gainOptions, { page = SettingsPage.TUNER }, onConfigChange)
                     SortSection(config, onConfigChange)
                     ObserverSection(config, onConfigChange, onRequestLocationPermission, onUpdateGps)
-                    MapRingsSection(config, onConfigChange)
                     PowerSection(config, onConfigChange)
-                    BaseMapSection(config, onConfigChange)
                     OfflineMapsSection(onOpenOfflineMaps)
                     OfflineTileSourceSection(config, onConfigChange)
                     DataSection(config, onConfigChange)
@@ -492,45 +489,6 @@ private fun ObserverSection(
     }
 }
 
-/**
- * Range rings drawn around the observer on the map. Free-form list rather than a
- * fixed enum (like [com.laviavi.adsbandroid.ui.map.RangeStep]) because the whole
- * point is letting the operator pick their own distances — up to
- * [AppConfig.MAX_MAP_RINGS], each up to [AppConfig.MAX_MAP_RING_MI] mi.
- */
-@Composable
-private fun MapRingsSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
-    SettingsSection(
-        "Map range rings",
-        "Concentric rings drawn around your position on the map.",
-    ) {
-        config.mapRingRadiiMi.forEachIndexed { index, mi ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingsField(
-                    value = mi.toString(),
-                    label = "Ring ${index + 1} (mi)",
-                    modifier = Modifier.weight(1f),
-                ) { text ->
-                    text.toIntOrNull()?.coerceIn(1, AppConfig.MAX_MAP_RING_MI)?.let { v ->
-                        onChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi.toMutableList().apply { set(index, v) }))
-                    }
-                }
-                IconButton(onClick = {
-                    onChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi.toMutableList().apply { removeAt(index) }))
-                }) {
-                    Icon(Icons.Default.Close, contentDescription = "Remove ring ${index + 1}", tint = AdsbColors.TextSecondary)
-                }
-            }
-        }
-        if (config.mapRingRadiiMi.size < AppConfig.MAX_MAP_RINGS) {
-            TextButton(onClick = {
-                val next = ((config.mapRingRadiiMi.maxOrNull() ?: 0) + 10).coerceIn(1, AppConfig.MAX_MAP_RING_MI)
-                onChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi + next))
-            }) { Text("+ Add ring", color = AdsbColors.Primary) }
-        }
-    }
-}
-
 @Composable
 private fun PowerSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
     SettingsSection("Auto-stop", "Stops the receiver if the dongle is absent, to save battery.") {
@@ -563,20 +521,6 @@ private fun OfflineMapsSection(onOpen: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Text("›", style = MaterialTheme.typography.titleMedium, color = AdsbColors.TextSecondary)
-        }
-    }
-}
-
-@Composable
-private fun BaseMapSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
-    SettingsSection("Base map", "Which tile source the Map tab renders.") {
-        BaseMap.entries.forEach { map ->
-            OptionRow(
-                label = map.label,
-                description = map.attribution,
-                selected = config.mapBaseMap == map,
-                onClick = { onChange(config.copy(mapBaseMap = map)) },
-            )
         }
     }
 }

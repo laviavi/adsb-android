@@ -4,6 +4,9 @@ import com.laviavi.adsbandroid.aircraft.AircraftSort
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.map.BaseMap
+import com.laviavi.adsbandroid.ui.map.RingColorPreset
+import com.laviavi.adsbandroid.ui.map.RingLineStyle
+import com.laviavi.adsbandroid.ui.map.RingWidth
 import com.laviavi.adsbandroid.units.DistanceUnit
 
 /**
@@ -102,6 +105,9 @@ data class AppConfig(
      * editing one ring's value never reorders the rows the user is looking at.
      */
     val mapRingRadiiMi: List<Int>       = listOf(10, 20, 30),
+    val mapRingColor: RingColorPreset   = RingColorPreset.CYAN,
+    val mapRingWidth: RingWidth         = RingWidth.THIN,
+    val mapRingLineStyle: RingLineStyle = RingLineStyle.SOLID,
 
     /**
      * Tile endpoint for *downloading* offline maps, with `{z}`/`{x}`/`{y}` placeholders.

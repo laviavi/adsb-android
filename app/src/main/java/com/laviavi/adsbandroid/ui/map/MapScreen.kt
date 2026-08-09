@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -17,11 +18,14 @@ import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -35,6 +39,8 @@ import com.laviavi.adsbandroid.map.BaseMap
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.ui.MainViewModel
 import com.laviavi.adsbandroid.ui.model.MapMarker
+import com.laviavi.adsbandroid.ui.settings.OptionRow
+import com.laviavi.adsbandroid.ui.settings.SettingsField
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 import com.laviavi.adsbandroid.units.DistanceUnit
@@ -79,10 +85,12 @@ private fun buildLabelOverlay(context: android.content.Context, baseMap: BaseMap
  * in "how far can I see", not in tile zoom. Each step names the two rings drawn.
  */
 enum class RangeStep(val innerMi: Double, val outerMi: Double) {
+    R3_6(3.0, 6.0),
     R6_12(6.0, 12.0),
     R12_25(12.0, 25.0),
     R25_50(25.0, 50.0),
-    R50_100(50.0, 100.0);
+    R50_100(50.0, 100.0),
+    R100_250(100.0, 250.0);
 
     /** The scale is named in statute miles; the overlay works in nautical miles. */
     val innerNm: Double get() = DistanceUnit.MILES.toNm(innerMi)
@@ -223,6 +231,9 @@ fun MapScreen(
         val ringsNm = config.mapRingRadiiMi.sorted().map { DistanceUnit.MILES.toNm(it.toDouble()) }
         overlay.ringRadiiNm = ringsNm
         overlay.ringLabels = ringsNm.map { config.distanceUnit.formatWhole(it) }
+        overlay.ringColorArgb = config.mapRingColor.color.toArgb()
+        overlay.ringWidthDp = config.mapRingWidth.dp
+        overlay.ringLineStyle = config.mapRingLineStyle
         overlay.onDecimated = { shown, total -> shownOfTotal = shown to total }
         mapView.invalidate()
     }
@@ -466,12 +477,16 @@ private fun LayersPanel(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.width(186.dp),
+        modifier = modifier.width(230.dp).heightIn(max = 420.dp),
         color = AdsbColors.Surface.copy(alpha = 0.97f),
         shape = RoundedCornerShape(AdsbDimens.CardCornerRadius),
         border = BorderStroke(1.dp, AdsbColors.Outline),
     ) {
-        Column(modifier = Modifier.padding(AdsbDimens.CardPadding)) {
+        Column(
+            modifier = Modifier
+                .padding(AdsbDimens.CardPadding)
+                .verticalScroll(rememberScrollState()),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "LAYERS",
@@ -498,34 +513,141 @@ private fun LayersPanel(
             }
 
             Spacer(Modifier.height(AdsbDimens.SpacingSm))
-            Text("TRAILS", fontFamily = FontFamily.Monospace, fontSize = 10.sp,
-                letterSpacing = 1.4.sp, color = AdsbColors.Primary)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-                AppConfig.TRAIL_LENGTHS.forEach { n ->
-                    val selected = config.mapTrailLength == n
-                    Text(
-                        if (n == 0) "off" else "$n",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        color = if (selected) AdsbColors.OnPrimary else AdsbColors.TextSecondary,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(AdsbDimens.PillCornerRadius))
-                            .background(if (selected) AdsbColors.Primary else Color.Transparent)
-                            .border(
-                                1.dp,
-                                if (selected) Color.Transparent else AdsbColors.Outline,
-                                RoundedCornerShape(AdsbDimens.PillCornerRadius),
-                            )
-                            .clickable { onConfigChange(config.copy(mapTrailLength = n)) }
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                    )
-                }
-            }
+            SectionLabel("TRAILS")
+            PillRow(
+                options = AppConfig.TRAIL_LENGTHS,
+                selected = config.mapTrailLength,
+                labelFor = { if (it == 0) "off" else "$it" },
+                onSelect = { onConfigChange(config.copy(mapTrailLength = it)) },
+            )
 
             HorizontalDivider(color = AdsbColors.SurfaceElevated, modifier = Modifier.padding(vertical = 8.dp))
             Text(
                 "Range $rangeLabel",
                 fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.TextDisabled,
+            )
+
+            HorizontalDivider(color = AdsbColors.SurfaceElevated, modifier = Modifier.padding(vertical = 8.dp))
+            SectionLabel("RANGE RINGS (MI)")
+            config.mapRingRadiiMi.forEachIndexed { index, mi ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    SettingsField(
+                        value = mi.toString(),
+                        label = "Ring ${index + 1}",
+                        modifier = Modifier.weight(1f),
+                    ) { text ->
+                        text.toIntOrNull()?.coerceIn(1, AppConfig.MAX_MAP_RING_MI)?.let { v ->
+                            onConfigChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi.toMutableList().apply { set(index, v) }))
+                        }
+                    }
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove ring ${index + 1}",
+                        tint = AdsbColors.TextSecondary,
+                        modifier = Modifier.size(16.dp).clickable {
+                            onConfigChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi.toMutableList().apply { removeAt(index) }))
+                        },
+                    )
+                }
+            }
+            if (config.mapRingRadiiMi.size < AppConfig.MAX_MAP_RINGS) {
+                TextButton(onClick = {
+                    val next = ((config.mapRingRadiiMi.maxOrNull() ?: 0) + 10).coerceIn(1, AppConfig.MAX_MAP_RING_MI)
+                    onConfigChange(config.copy(mapRingRadiiMi = config.mapRingRadiiMi + next))
+                }) { Text("+ Add ring", color = AdsbColors.Primary) }
+            }
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            SectionLabel("RING COLOR")
+            ColorSwatchRow(selected = config.mapRingColor) {
+                onConfigChange(config.copy(mapRingColor = it))
+            }
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            SectionLabel("RING WIDTH")
+            PillRow(
+                options = RingWidth.entries,
+                selected = config.mapRingWidth,
+                labelFor = RingWidth::label,
+                onSelect = { onConfigChange(config.copy(mapRingWidth = it)) },
+            )
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            SectionLabel("RING STYLE")
+            PillRow(
+                options = RingLineStyle.entries,
+                selected = config.mapRingLineStyle,
+                labelFor = RingLineStyle::label,
+                onSelect = { onConfigChange(config.copy(mapRingLineStyle = it)) },
+            )
+
+            HorizontalDivider(color = AdsbColors.SurfaceElevated, modifier = Modifier.padding(vertical = 8.dp))
+            SectionLabel("BASE MAP")
+            Column(modifier = Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                BaseMap.entries.forEach { map ->
+                    OptionRow(
+                        label = map.label,
+                        selected = config.mapBaseMap == map,
+                        onClick = { onConfigChange(config.copy(mapBaseMap = map)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+        letterSpacing = 1.4.sp, color = AdsbColors.Primary)
+}
+
+/** Row of selectable pills — used for trail length, ring width, and ring line style. */
+@Composable
+private fun <T> PillRow(options: List<T>, selected: T, labelFor: (T) -> String, onSelect: (T) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+        options.forEach { option ->
+            val isSelected = option == selected
+            Text(
+                labelFor(option),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                color = if (isSelected) AdsbColors.OnPrimary else AdsbColors.TextSecondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(AdsbDimens.PillCornerRadius))
+                    .background(if (isSelected) AdsbColors.Primary else Color.Transparent)
+                    .border(
+                        1.dp,
+                        if (isSelected) Color.Transparent else AdsbColors.Outline,
+                        RoundedCornerShape(AdsbDimens.PillCornerRadius),
+                    )
+                    .clickable { onSelect(option) }
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ColorSwatchRow(selected: RingColorPreset, onSelect: (RingColorPreset) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+        RingColorPreset.entries.forEach { preset ->
+            val isSelected = preset == selected
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(preset.color)
+                    .border(
+                        if (isSelected) 2.dp else 1.dp,
+                        if (isSelected) AdsbColors.TextPrimary else AdsbColors.Outline,
+                        CircleShape,
+                    )
+                    .clickable { onSelect(preset) },
             )
         }
     }

@@ -10,6 +10,9 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.map.BaseMap
+import com.laviavi.adsbandroid.ui.map.RingColorPreset
+import com.laviavi.adsbandroid.ui.map.RingLineStyle
+import com.laviavi.adsbandroid.ui.map.RingWidth
 import com.laviavi.adsbandroid.units.DistanceUnit
 import kotlinx.coroutines.flow.first
 
@@ -48,6 +51,9 @@ class AppConfigStore(private val context: Context) {
         val mapTrailLength       = intPreferencesKey("map_trail_length")
         val mapRingRadii         = stringPreferencesKey("map_ring_radii_mi")
         val mapBaseMap           = stringPreferencesKey("map_base_map")
+        val mapRingColor         = stringPreferencesKey("map_ring_color")
+        val mapRingWidth         = stringPreferencesKey("map_ring_width")
+        val mapRingLineStyle     = stringPreferencesKey("map_ring_line_style")
     }
 
     suspend fun load(): AppConfig {
@@ -91,6 +97,15 @@ class AppConfigStore(private val context: Context) {
             mapBaseMap = prefs[Keys.mapBaseMap]
                 ?.let { runCatching { BaseMap.valueOf(it) }.getOrNull() }
                 ?: defaults.mapBaseMap,
+            mapRingColor = prefs[Keys.mapRingColor]
+                ?.let { runCatching { RingColorPreset.valueOf(it) }.getOrNull() }
+                ?: defaults.mapRingColor,
+            mapRingWidth = prefs[Keys.mapRingWidth]
+                ?.let { runCatching { RingWidth.valueOf(it) }.getOrNull() }
+                ?: defaults.mapRingWidth,
+            mapRingLineStyle = prefs[Keys.mapRingLineStyle]
+                ?.let { runCatching { RingLineStyle.valueOf(it) }.getOrNull() }
+                ?: defaults.mapRingLineStyle,
         )
     }
 
@@ -125,6 +140,9 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.mapTrailLength]     = config.mapTrailLength
             prefs[Keys.mapRingRadii]       = config.mapRingRadiiMi.joinToString(",")
             prefs[Keys.mapBaseMap]         = config.mapBaseMap.name
+            prefs[Keys.mapRingColor]       = config.mapRingColor.name
+            prefs[Keys.mapRingWidth]       = config.mapRingWidth.name
+            prefs[Keys.mapRingLineStyle]   = config.mapRingLineStyle.name
         }
     }
 }

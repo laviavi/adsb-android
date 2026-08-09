@@ -2106,3 +2106,52 @@ complaint, not just another option next to the same problem.
 `:core:receiver:test` + `:app:testDebugUnitTest` pass, unchanged counts (no
 new testable logic — this is static enum data). Version bumped to v1.6.12
 (`versionCode` 27), debug APK built and added to `dist/`. Not pushed.
+
+## 42. Zoom-step widening, ring color/width/line-type, Base map + rings moved into the Map tab (2026-08-09, v1.6.13)
+
+Three Map-tab changes, planned and approved before coding per Avi's request.
+
+**+/- zoom "doesn't work" on the 4 new basemaps.** Investigated first —
+curled all 6 basemap tile URLs directly, all returned HTTP 200 with real
+tile bytes (including with the app's bare package-name User-Agent), and
+`+`/`-` (`MapScreen.kt` `MapControls`/`ControlButton`) has zero
+basemap-conditional code; it only reacts to a local `rangeStep` state. No
+basemap-specific root cause could be confirmed. `RangeStep`
+(`MapScreen.kt:81-95`) widened from 4 to 6 steps (`R3_6` through
+`R100_250`, the far end matching `AppConfig.MAX_MAP_RING_MI`) so `+`/`-`
+rarely hit the disabled ends — the fix direction Avi approved regardless of
+root cause. Flagged in the plan: if the complaint still reproduces on a
+specific basemap after this ships, that's real signal for an on-device
+logcat investigation, not another guess.
+
+**Configurable range-ring color/width/line style.** New file
+`ui/map/RingStyle.kt`: `RingColorPreset` (6 swatches — Cyan/Amber/Green/
+Red/White/Grey, Cyan matching the old hardcoded look), `RingWidth` (Thin/
+Medium/Thick, Thin = old default), `RingLineStyle` (Solid/Dashed/Dotted,
+Solid = old default). Three new `AppConfig` fields
+(`mapRingColor`/`mapRingWidth`/`mapRingLineStyle`), persisted in
+`AppConfigStore` the same `valueOf`/`.name` pattern as `mapBaseMap`.
+`AircraftOverlay.drawRings()` now reads `ringColorArgb`/`ringWidthDp`/
+`ringLineStyle` instead of a hardcoded `AdsbColors.Primary`/1dp/solid —
+dashed/dotted done via `DashPathEffect` (+ round stroke cap for dots).
+Defaults reproduce the exact old visuals, so nothing changes until a user
+picks something else.
+
+**Base map + range-ring settings moved from Settings into the Map tab's
+Layers panel.** `SettingsScreen.kt`'s `BaseMapSection`/`MapRingsSection`
+deleted outright (not duplicated). `MapScreen.kt`'s `LayersPanel` — widened
+186dp → 230dp, height-capped and made scrollable
+(`verticalScroll`/`heightIn(max = 420.dp)`) since it now also holds a
+6-entry base-map picker, up to 5 ring-radius rows, and the 3 new ring-style
+pickers — gained: base-map picker (reusing `OptionRow` from
+`ui/settings/SettingsComponents.kt`, now imported into `MapScreen.kt`),
+ring-radius rows (ported from the deleted `MapRingsSection`, reusing
+`SettingsField`), a new `ColorSwatchRow`, and a new generic `PillRow`
+(factored out and reused 3× — trail length, ring width, ring line style —
+instead of copy-pasting the pill-row pattern).
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass (no new pure logic —
+this is Compose UI + Android `Paint` wiring, not unit-testable without
+Robolectric/instrumentation). Debug APK built, v1.6.13 (`versionCode` 28),
+added to `dist/`. Not yet verified on-device — pending Avi confirming the
+zoom-step fix actually resolves the original complaint.

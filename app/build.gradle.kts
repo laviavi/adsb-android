@@ -15,8 +15,8 @@ android {
         applicationId = "com.laviavi.adsbandroid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "1.6.12"
+        versionCode = 28
+        versionName = "1.6.13"
     }
 
     buildTypes {
