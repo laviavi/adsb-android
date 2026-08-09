@@ -2237,5 +2237,5 @@ follow-up decision:**
   already covers with a documented, already-trusted source.
 
 `:core:receiver:test` + `:app:testDebugUnitTest` pass, 11 new tests, 0
-failures. `:app:assembleDebug` succeeds. Not yet version-bumped, built into
-an APK, or committed — pending Avi's go-ahead.
+failures. Version bumped to v1.6.14 (`versionCode` 29), debug APK built and
+added to `dist/`.
