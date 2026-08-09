@@ -62,7 +62,7 @@ certify the sample-rate bug that broke reception (Session 7/8).
 | Script | Purpose |
 |---|---|
 | `tools/phase0_goldens.py` | Regenerate Python golden fixtures (parity reference) |
-| `tools/gen_airlines.py` | Regenerate `Airlines.kt` from the Python table |
+| `tools/gen_airlines.py` | Regenerate `Airlines.kt` from the Python reference table + cached `tools/openflights_airlines.dat` (reference wins on conflict) |
 | `tools/gen_registration_parity.py` | Regenerate the ICAO→N-number parity digest |
 
 Generated Kotlin is never hand-edited — change the Python source and regenerate.

@@ -169,7 +169,10 @@ class EnrichmentTests {
         }
 
         @Test fun `unknown or unusable callsigns return null`() {
-            listOf(null, "", "  ", "XX", "ZZZ9999", "N38901")
+            // XQZ isn't a real ICAO airline prefix and isn't in either source table —
+            // unlike "ZZZ", which used to be a safe "definitely unmapped" example until
+            // OpenFlights turned out to have a real Zabaykalskii Airlines entry for it.
+            listOf(null, "", "  ", "XX", "XQZ9999", "N38901")
                 .forEach { assertNull(Airlines.fromCallsign(it), "callsign '$it'") }
         }
 
@@ -183,7 +186,11 @@ class EnrichmentTests {
         }
 
         @Test fun `table was generated, not left empty`() {
-            assertEquals(155, Airlines.size, "regenerate with tools/gen_airlines.py")
+            // Not an exact count: the table is now the Python reference (155,
+            // fixed) merged with OpenFlights' airlines.dat, which grows/shrinks
+            // slightly whenever that cache is refreshed — a floor is what
+            // actually catches "generation silently produced an empty table".
+            assertTrue(Airlines.size >= 1000, "regenerate with tools/gen_airlines.py — got ${Airlines.size}")
         }
     }
 

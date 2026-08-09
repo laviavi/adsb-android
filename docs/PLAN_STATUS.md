@@ -1965,3 +1965,53 @@ Full suite: 400 core + 84 app tests, 0 failures (no regressions — this is
 Service lifecycle + Compose wiring, no new pure logic to unit-test); debug
 APK builds. Version bumped to v1.6.8 (`versionCode` 23) before this build,
 then released.
+
+## 38. Airlines.kt expanded 155 → 1,052 entries via OpenFlights (2026-08-09, v1.6.9)
+
+Requested feature was "scrape planespotters.net for airline data, embed it,
+use it for callsign → airline lookups." Investigated that specific site
+first — it's not viable: the current `/airlines` index page no longer has
+the table markup a reference scraper expected, and every individual
+`/airline/<name>` detail page (confirmed on three different airlines)
+redirects to a live Cloudflare-style bot challenge, not real content. No
+change proceeded on that path; Avi agreed to substitute a data source that
+actually works for the same underlying goal — offline airline-name coverage
+for `Airlines.fromCallsign()`.
+
+**Source: OpenFlights' `airlines.dat`** (https://openflights.org, ODbL
+license) — a maintained, freely-downloadable CSV with exactly the shape
+needed (Name, IATA, ICAO, Callsign, Country, Active), no scraping or bot
+wall involved. Cached at `tools/openflights_airlines.dat` (6,162 rows as of
+this fetch); refresh with the `curl` command in `gen_airlines.py`'s
+docstring.
+
+**`tools/gen_airlines.py` rewritten** to merge two sources instead of one:
+- The Python reference's `_AIRLINE_MAP` (155 entries, verified against real
+  traffic) — **always wins on a conflicting ICAO prefix.**
+- OpenFlights entries filtered to `Active == "Y"` with a real 3-letter ICAO
+  code — only fills prefixes the reference table doesn't already cover.
+- Filter bug caught and fixed during this same pass: Python's `str.isalpha()`
+  accepts *any* Unicode letter, not just A–Z — an early run let through a
+  handful of non-Latin ICAO codes (e.g. Cyrillic `КТК`) that can never match
+  a real ADS-B callsign (always ASCII per the Mode S encoding). Fixed to
+  `icao.isascii() and icao.isalpha()`. Non-Latin *airline names* (e.g. `PKV`
+  → `Псковавиа`) are legitimate and kept — only the lookup key was ever the
+  problem.
+- `Airlines.kt`'s header doc comment updated to describe both sources and
+  carries the ODbL attribution.
+
+**Result: 1,052 total** (155 reference + 897 new from OpenFlights).
+
+**Two pre-existing tests updated** for the now-expected larger table
+(`core/receiver/.../enrich/EnrichmentTests.kt`):
+- `table was generated, not left empty` asserted an exact `155` — changed to
+  a `>= 1000` floor, since the merged count will drift slightly whenever the
+  OpenFlights cache is refreshed; a floor is what actually catches "generation
+  silently produced an empty table," which is the test's real intent.
+- `unknown or unusable callsigns return null` used `"ZZZ9999"` as a
+  "definitely unmapped prefix" example — OpenFlights turned out to have a
+  real `ZZZ` → Zabaykalskii Airlines entry, so that assumption broke.
+  Replaced with `"XQZ9999"`, confirmed absent from the merged table.
+
+Full suite: 400 core + 84 app tests, 0 failures; debug APK builds. Version
+bumped to v1.6.9 (`versionCode` 24) before this build, then released.
