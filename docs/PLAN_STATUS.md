@@ -2015,3 +2015,33 @@ docstring.
 
 Full suite: 400 core + 84 app tests, 0 failures; debug APK builds. Version
 bumped to v1.6.9 (`versionCode` 24) before this build, then released.
+
+## 39. adsbdb field-mapping bug fixed — aircraft type was always incomplete (2026-08-09, v1.6.10)
+
+Root-caused why ICAO C066C4 (Canadian, Harbour Air Cessna 172M, C-GMXV)
+showed no aircraft type at all. `AdsbdbAircraftFields`
+(`app/.../data/AircraftMetaEnrichment.kt`) declared a `registerType` field
+for the ICAO type designator — that field **does not exist anywhere in
+adsbdb's real response** (verified live: `{"type":"172M","icao_type":"C172",
+"manufacturer":"Cessna",...}`, no `registerType` key at all). With
+`ignoreUnknownKeys = true` this never crashed — it silently deserialized to
+`null` on every single adsbdb-sourced aircraft, so `model` was always null,
+and `typeDisplay()`'s `"$manufacturer $model"` branch could never fire for
+this source; at best it fell through to a bare, non-ICAO-mapped fallback
+string.
+
+**Fix**: added `@SerialName("icao_type") val icaoType` to
+`AdsbdbAircraftFields`, and swapped the mapping — `typeCode` now reads from
+`icao_type` ("C172"), `model` now reads from the old `type` field ("172M",
+free text) — matching the same field-role split hexdb.io's response already
+used (`ICAOTypeCode` vs `Type`).
+
+**Extracted for testability**: the field→`AircraftMeta` mapping moved out of
+`fetchAdsbdb()` into a pure top-level `internal fun mapAdsbdbFields()`, and
+`AdsbdbAircraftFields` promoted from file-private to `internal` so tests can
+construct it directly — same pattern as `isFirstAttemptDue`/`FaRateLimiter`
+in §35. New `AdsbdbFieldMappingTests.kt` (3 tests) uses C066C4's real
+captured response shape as the fixture.
+
+Full suite: 400 core + 87 app tests (3 new), 0 failures; debug APK builds.
+Version bumped to v1.6.10 (`versionCode` 25) before this build, then released.

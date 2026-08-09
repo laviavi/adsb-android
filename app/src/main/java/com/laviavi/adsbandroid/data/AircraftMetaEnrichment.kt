@@ -94,12 +94,28 @@ private data class AdsbdbAircraftResponse(val response: AdsbdbAircraftBody? = nu
 @Serializable
 private data class AdsbdbAircraftBody(val aircraft: AdsbdbAircraftFields? = null)
 @Serializable
-private data class AdsbdbAircraftFields(
+internal data class AdsbdbAircraftFields(
     val registration: String?  = null,
+    /** Free-text model, e.g. "172M" — NOT an ICAO type designator despite the field name. */
     val type: String?          = null,
     val manufacturer: String?  = null,
-    val registerType: String?  = null,
+    /** The actual ICAO type designator, e.g. "C172". `registerType` (the old field
+     *  name here) doesn't exist anywhere in adsbdb's real response — it always
+     *  deserialized to null, which meant `model` below was always null too, and
+     *  `typeDisplay()` could never show "$manufacturer $model" for an adsbdb-sourced
+     *  aircraft, only a bare, non-ICAO-mapped fallback string like "172M". */
+    @SerialName("icao_type") val icaoType: String? = null,
 )
+
+/** Pure so the field-mapping (icaoType -> typeCode, type -> model) is directly testable. */
+internal fun mapAdsbdbFields(icao: String, ac: AdsbdbAircraftFields): AircraftMeta? {
+    val reg = ac.registration.present()
+    val tc  = ac.icaoType.present()?.uppercase()
+    val mfr = ac.manufacturer.present()
+    val mdl = ac.type.present()
+    if (reg == null && mfr == null && mdl == null && tc == null) return null
+    return AircraftMeta(icao, reg, mfr, mdl, tc, null, "adsbdb")
+}
 
 /**
  * Per-ICAO metadata from three public APIs: hexdb.io → OpenSky → adsbdb.
@@ -203,13 +219,7 @@ class AircraftMetaEnrichment(
         ) {
             headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
         }.body()
-        val ac   = resp.response?.aircraft ?: return@runCatching null
-        val reg  = ac.registration.present()
-        val tc   = ac.type.present()?.uppercase()
-        val mfr  = ac.manufacturer.present()
-        val mdl  = ac.registerType.present()
-        if (reg == null && mfr == null && mdl == null && tc == null) return@runCatching null
-        AircraftMeta(icao, reg, mfr, mdl, tc, null, "adsbdb")
+        resp.response?.aircraft?.let { mapAdsbdbFields(icao, it) }
     }.getOrElse {
         Log.d(TAG, "adsbdb error for $icao: $it")
         null

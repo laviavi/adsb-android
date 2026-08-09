@@ -1,6 +1,9 @@
 package com.laviavi.adsbandroid.data
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -44,5 +47,44 @@ class AircraftMetaEnrichmentTests {
         assertTrue(isCacheFresh(cachedAt, threeHoursLater, ttlMs = oldThirtyDayTtlMs))
         // The fixed default (2h) correctly forces a retry at the same instant.
         assertFalse(isCacheFresh(cachedAt, threeHoursLater))
+    }
+}
+
+/**
+ * Regression coverage for the adsbdb field-mapping bug: `AdsbdbAircraftFields`
+ * used to read the ICAO type designator from a field named `registerType`,
+ * which doesn't exist anywhere in adsbdb's real response — it always
+ * deserialized to null, so `model` was always null and `typeDisplay()` could
+ * never show "$manufacturer $model" for an adsbdb-sourced aircraft.
+ *
+ * Fixture is ICAO C066C4's real live response (verified 2026-08-09): a
+ * Harbour Air Cessna 172M, registration C-GMXV — adsbdb's actual JSON has
+ * `"type":"172M"` (the free-text model) and `"icao_type":"C172"` (the real
+ * ICAO designator), not a `registerType` field at all.
+ */
+class AdsbdbFieldMappingTests {
+
+    @Test fun `type code comes from icao_type, not the free-text type field`() {
+        val ac = AdsbdbAircraftFields(
+            registration = "CA-GMXV",
+            type = "172M",
+            manufacturer = "Cessna",
+            icaoType = "C172",
+        )
+        val meta = mapAdsbdbFields("C066C4", ac)
+        assertNotNull(meta)
+        assertEquals("C172", meta!!.typeCode, "typeCode must be the real ICAO designator")
+        assertEquals("172M", meta.model, "model must be the free-text type string")
+        assertEquals("Cessna", meta.manufacturer)
+    }
+
+    @Test fun `manufacturer and model combine once model is no longer stuck null`() {
+        val ac = AdsbdbAircraftFields(type = "172M", manufacturer = "Cessna", icaoType = "C172")
+        val meta = mapAdsbdbFields("C066C4", ac)
+        assertEquals("Cessna 172M", meta!!.typeDisplay())
+    }
+
+    @Test fun `all fields absent yields no result`() {
+        assertNull(mapAdsbdbFields("C066C4", AdsbdbAircraftFields()))
     }
 }
