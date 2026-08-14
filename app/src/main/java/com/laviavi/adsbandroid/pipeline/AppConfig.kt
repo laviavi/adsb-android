@@ -4,6 +4,7 @@ import com.laviavi.adsbandroid.aircraft.AircraftSort
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.map.BaseMap
+import com.laviavi.adsbandroid.ui.map.MapLabelSize
 import com.laviavi.adsbandroid.ui.map.RingColorPreset
 import com.laviavi.adsbandroid.ui.map.RingLineStyle
 import com.laviavi.adsbandroid.ui.map.RingWidth
@@ -91,8 +92,12 @@ data class AppConfig(
     val distanceUnit: DistanceUnit      = DistanceUnit.MILES,
 
     // --- Map layers. Presentation-only; none of these touch the pipeline. ---
-    /** Which tile source the live map renders. Independent of [offlineTileUrlTemplate]. */
+    /** Which vector style the live map renders. */
     val mapBaseMap: BaseMap             = BaseMap.LIBERTY,
+    /** `MapLabelSize.DEFAULT` leaves the basemap's own per-layer label sizing untouched. */
+    val mapLabelSize: MapLabelSize      = MapLabelSize.DEFAULT,
+    /** Null leaves the basemap's own per-layer label colors untouched. */
+    val mapLabelColor: RingColorPreset? = null,
     val mapShowRangeRings: Boolean      = true,
     val mapShowLabels: Boolean          = true,
     val mapShowGroundTraffic: Boolean   = true,
@@ -108,6 +113,8 @@ data class AppConfig(
     val mapRingColor: RingColorPreset   = RingColorPreset.CYAN,
     val mapRingWidth: RingWidth         = RingWidth.THIN,
     val mapRingLineStyle: RingLineStyle = RingLineStyle.SOLID,
+    /** Radius of the "download area around current position" offline-maps action, in nautical miles. */
+    val offlineRadiusNm: Int            = 50,
 ) {
     /**
      * The only thing enrichment call sites should test. A derived getter rather
@@ -139,6 +146,10 @@ data class AppConfig(
 
         const val MAX_MAP_RINGS = 5
         const val MAX_MAP_RING_MI = 250
+
+        const val OFFLINE_RADIUS_MIN_NM = 10
+        const val OFFLINE_RADIUS_MAX_NM = 200
+        const val OFFLINE_RADIUS_STEP_NM = 10
     }
 }
 

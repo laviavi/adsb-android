@@ -111,6 +111,10 @@ fun MapScreen(
     // Rebuilt every time the style (base map) changes — a new Style instance discards
     // every previously added source/layer, so the aircraft layer can't be reused across it.
     var aircraftLayer by remember { mutableStateOf<AircraftMapLayer?>(null) }
+    // The current style's own label-layer IDs (differ per OpenFreeMap style — see
+    // BasemapLabelStyler) — fetched once per style switch, reused by the label
+    // size/color effect below so changing just those doesn't need a re-fetch.
+    var labelLayerIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     DisposableEffect(mapView) {
         mapView.onStart()
@@ -152,9 +156,21 @@ fun MapScreen(
     // previously added source/layer — the aircraft layer is rebuilt against the new one.
     LaunchedEffect(map, config.mapBaseMap) {
         val m = map ?: return@LaunchedEffect
-        m.setStyle(config.mapBaseMap.styleUrl) { style ->
+        val styleUrl = config.mapBaseMap.styleUrl
+        m.setStyle(styleUrl) { style ->
             aircraftLayer = AircraftMapLayer(style, density)
         }
+        labelLayerIds = BasemapLabelStyler.fetchLabelLayerIds(styleUrl)
+        map?.style?.let { style ->
+            BasemapLabelStyler.apply(style, labelLayerIds, config.mapLabelSize, config.mapLabelColor?.toHex())
+        }
+    }
+
+    // Label size/color changing alone (no basemap switch) reapplies against the
+    // already-fetched IDs — no need to refetch the style JSON for this.
+    LaunchedEffect(map, labelLayerIds, config.mapLabelSize, config.mapLabelColor) {
+        val style = map?.style ?: return@LaunchedEffect
+        BasemapLabelStyler.apply(style, labelLayerIds, config.mapLabelSize, config.mapLabelColor?.toHex())
     }
 
     // One combined camera effect instead of two separately-keyed ones: a past bug had
@@ -183,7 +199,7 @@ fun MapScreen(
             showGroundTraffic = config.mapShowGroundTraffic,
             ringRadiiNm = config.mapRingRadiiMi.sorted().map { DistanceUnit.MILES.toNm(it.toDouble()) },
             ringLabels = config.mapRingRadiiMi.sorted().map { config.distanceUnit.formatWhole(DistanceUnit.MILES.toNm(it.toDouble())) },
-            ringColorHex = "#%06X".format(config.mapRingColor.color.toArgb() and 0xFFFFFF),
+            ringColorHex = config.mapRingColor.toHex(),
             ringWidthPx = config.mapRingWidth.dp,
             ringDash = null,
             zoom = currentZoom,
@@ -259,6 +275,8 @@ fun MapScreen(
         }
     }
 }
+
+private fun RingColorPreset.toHex(): String = "#%06X".format(color.toArgb() and 0xFFFFFF)
 
 /**
  * Tile zoom at which the outer ring spans ~80 % of the shorter screen edge.
@@ -519,6 +537,21 @@ private fun LayersPanel(
                     )
                 }
             }
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            SectionLabel("BASEMAP LABEL SIZE")
+            PillRow(
+                options = MapLabelSize.entries,
+                selected = config.mapLabelSize,
+                labelFor = MapLabelSize::label,
+                onSelect = { onConfigChange(config.copy(mapLabelSize = it)) },
+            )
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            SectionLabel("BASEMAP LABEL COLOR")
+            NullableColorSwatchRow(selected = config.mapLabelColor) {
+                onConfigChange(config.copy(mapLabelColor = it))
+            }
         }
     }
 }
@@ -558,6 +591,43 @@ private fun <T> PillRow(options: List<T>, selected: T, labelFor: (T) -> String, 
 @Composable
 private fun ColorSwatchRow(selected: RingColorPreset, onSelect: (RingColorPreset) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+        RingColorPreset.entries.forEach { preset ->
+            val isSelected = preset == selected
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(preset.color)
+                    .border(
+                        if (isSelected) 2.dp else 1.dp,
+                        if (isSelected) AdsbColors.TextPrimary else AdsbColors.Outline,
+                        CircleShape,
+                    )
+                    .clickable { onSelect(preset) },
+            )
+        }
+    }
+}
+
+/** Same swatch row, plus a leading "no override" option — used for basemap label color, where null means "leave the basemap's own colors alone". */
+@Composable
+private fun NullableColorSwatchRow(selected: RingColorPreset?, onSelect: (RingColorPreset?) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(AdsbColors.Surface)
+                .border(
+                    if (selected == null) 2.dp else 1.dp,
+                    if (selected == null) AdsbColors.TextPrimary else AdsbColors.Outline,
+                    CircleShape,
+                )
+                .clickable { onSelect(null) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("×", fontSize = 12.sp, color = AdsbColors.TextSecondary)
+        }
         RingColorPreset.entries.forEach { preset ->
             val isSelected = preset == selected
             Box(

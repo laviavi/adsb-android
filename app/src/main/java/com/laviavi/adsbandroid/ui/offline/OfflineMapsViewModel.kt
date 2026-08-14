@@ -10,6 +10,7 @@ import com.laviavi.adsbandroid.offline.NetworkState
 import com.laviavi.adsbandroid.offline.OfflineDownloadEvent
 import com.laviavi.adsbandroid.offline.OfflineDownloadPolicy
 import com.laviavi.adsbandroid.offline.SavedRegion
+import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.pipeline.AppConfigStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -27,6 +28,7 @@ data class OfflineMapsUiState(
     val networkState: NetworkState = NetworkState.UNKNOWN,
     val downloadProgress: OfflineDownloadEvent.Progress? = null,
     val message: String? = null,
+    val radiusNm: Int = 50,
 ) {
     val wifiReady: Boolean get() = OfflineDownloadPolicy.isDownloadAllowed(networkState)
     val isDownloading: Boolean get() = downloadProgress != null
@@ -58,11 +60,21 @@ class OfflineMapsViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             val regions = repository.list()
-            _uiState.value = _uiState.value.copy(regions = regions, networkState = eligibility.currentState())
+            val radius = runCatching { configStore.load().offlineRadiusNm }.getOrDefault(_uiState.value.radiusNm)
+            _uiState.value = _uiState.value.copy(regions = regions, networkState = eligibility.currentState(), radiusNm = radius)
         }
     }
 
-    /** Downloads a fixed-radius area around [lat]/[lon] using the currently selected base map style. */
+    /** Persists the radius so it's remembered next time, same pattern as every other Settings field. */
+    fun setRadius(nm: Int) {
+        val clamped = nm.coerceIn(AppConfig.OFFLINE_RADIUS_MIN_NM, AppConfig.OFFLINE_RADIUS_MAX_NM)
+        _uiState.value = _uiState.value.copy(radiusNm = clamped)
+        viewModelScope.launch {
+            runCatching { configStore.save(configStore.load().copy(offlineRadiusNm = clamped)) }
+        }
+    }
+
+    /** Downloads an area around [lat]/[lon], radius per the current setting, using the currently selected base map style. */
     fun download(lat: Double, lon: Double) {
         val result = eligibility.check()
         if (result is EligibilityResult.Ineligible) {
@@ -72,7 +84,7 @@ class OfflineMapsViewModel @Inject constructor(
         downloadJob = viewModelScope.launch {
             val styleUrl = runCatching { configStore.load().mapBaseMap.styleUrl }.getOrDefault(DEFAULT_STYLE_URL)
             val name = namer.nameFor(lat, lon) ?: "Offline area"
-            val bounds = boundsAround(lat, lon, RADIUS_NM)
+            val bounds = boundsAround(lat, lon, _uiState.value.radiusNm.toDouble())
             repository.download(styleUrl, bounds, MIN_ZOOM, MAX_ZOOM, 1f, name).collect { event ->
                 when (event) {
                     is OfflineDownloadEvent.Progress ->
@@ -112,7 +124,6 @@ class OfflineMapsViewModel @Inject constructor(
     }
 
     companion object {
-        const val RADIUS_NM = 50.0
         const val MIN_ZOOM = 4.0
         const val MAX_ZOOM = 12.0
         private const val DEFAULT_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"

@@ -2430,3 +2430,69 @@ step before trusting this, more so than any other change this session.
 
 Version bumped to v2.0.0 (`versionCode` 32), debug APK built and added to
 `dist/`.
+
+## 46. Variable offline download radius + basemap label size/color overrides (2026-08-14, v2.0.1)
+
+Two follow-ups to §45, requested together.
+
+**Offline download radius, was fixed at 50nm.** New `AppConfig.offlineRadiusNm`
+(default 50, `OFFLINE_RADIUS_MIN_NM`/`MAX_NM`/`STEP_NM` = 10/200/10),
+persisted like every other setting. `OfflineMapsViewModel` loads/saves it
+through the same `AppConfigStore` it already had; `OfflineMapsScreen.kt`
+exposes it via the existing `EditableStepperRow` (Avi's established
+"Editable Stepper" pattern, same component already used for auto-stop and
+GPS refresh interval) instead of the old hardcoded description text. Zoom
+range (4–12) and style (whatever base map is selected) stay fixed — only
+radius was asked for. Known minor quirk: `EditableStepperRow`'s "Off"
+button unconditionally sets 0, which `setRadius()` immediately clamps back
+up to the 10nm floor — so "Off" reads oddly but can't actually break
+anything. Not worth forking the shared component for.
+
+**Basemap label font size/color** — genuinely uncontrolled before this
+(flagged honestly when Avi asked): `MapScreen.kt` just handed OpenFreeMap's
+style URL to `setStyle()` and rendered whatever labels/fonts/colors
+OpenFreeMap authored, no app-side hook at all. Investigated by actually
+fetching all 4 real style JSON documents and diffing their label layers —
+**confirmed live, not assumed**: Liberty and Bright share the same 23
+label-layer IDs (`label_city`, `highway-name-major`, etc.), but Positron
+drops 4 (no POI labels) and **Dark uses a completely different naming
+scheme** (`place_city` instead of `label_city`, `water_name` instead of
+`water_name_point_label`, etc.) — a hardcoded layer-ID list would have
+silently done nothing on Dark specifically.
+
+Fix: new `ui/map/BasemapLabelStyler.kt` fetches the *same* style JSON
+MapLibre already loads internally (a small redundant request, once per
+style switch — the Kotlin SDK doesn't reliably expose reading a loaded
+native layer's current property values, so re-parsing the JSON is the
+simplest reliable way to discover which layer IDs are actually labels:
+any layer with a `layout.text-field`) and applies overrides via
+`Layer.setProperties()` (verified via `javap` against the real AAR — a
+base-class method, works on any layer type generically, not just
+`SymbolLayer`). New `AppConfig` fields: `mapLabelSize: MapLabelSize`
+(`DEFAULT`/`SMALL`/`MEDIUM`/`LARGE`, new `ui/map/MapLabelSize.kt`) and
+`mapLabelColor: RingColorPreset?` (nullable — reuses the existing ring
+color palette rather than inventing a new one). **`DEFAULT`/`null` means
+"don't touch"** — OpenFreeMap's own per-layer, zoom-responsive sizing
+(country names bigger than village names, labels fading in by zoom) is
+preserved unless Avi deliberately overrides it; picking a size flattens
+every label layer to one fixed size, picking a color applies it uniformly
+across all label layers, both trading OpenFreeMap's per-category nuance
+for simple, predictable, working control — a deliberate simplification,
+not an oversight.
+
+New Layers-panel controls (`MapScreen.kt`): "BASEMAP LABEL SIZE" (`PillRow`,
+reusing the pattern already used for ring width/style) and "BASEMAP LABEL
+COLOR" (new `NullableColorSwatchRow` — the existing `ColorSwatchRow` has no
+concept of "no selection," so this is a small separate composable with a
+leading "×" default swatch, rather than changing the ring-color control's
+established non-nullable contract). Label-layer IDs are cached per style
+switch (`labelLayerIds` remember state) so changing just size/color doesn't
+re-fetch the JSON.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, `:app:assembleDebug`
+succeeds. No new pure logic worth a dedicated test — this is Compose UI
+wiring plus a thin JSON-parsing wrapper around a verified-working
+technique already tested elsewhere in the codebase. Version bumped to
+v2.0.1 (`versionCode` 33), debug APK built and added to `dist/`. Not
+visually verified, same standing caveat as §45 — no device connected, no
+external browser access in this sandbox.

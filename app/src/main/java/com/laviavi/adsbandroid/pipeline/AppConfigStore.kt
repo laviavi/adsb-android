@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.map.BaseMap
+import com.laviavi.adsbandroid.ui.map.MapLabelSize
 import com.laviavi.adsbandroid.ui.map.RingColorPreset
 import com.laviavi.adsbandroid.ui.map.RingLineStyle
 import com.laviavi.adsbandroid.ui.map.RingWidth
@@ -52,6 +53,9 @@ class AppConfigStore(private val context: Context) {
         val mapRingColor         = stringPreferencesKey("map_ring_color")
         val mapRingWidth         = stringPreferencesKey("map_ring_width")
         val mapRingLineStyle     = stringPreferencesKey("map_ring_line_style")
+        val mapLabelSize         = stringPreferencesKey("map_label_size")
+        val mapLabelColor        = stringPreferencesKey("map_label_color")
+        val offlineRadiusNm      = intPreferencesKey("offline_radius_nm")
     }
 
     suspend fun load(): AppConfig {
@@ -102,6 +106,13 @@ class AppConfigStore(private val context: Context) {
             mapRingLineStyle = prefs[Keys.mapRingLineStyle]
                 ?.let { runCatching { RingLineStyle.valueOf(it) }.getOrNull() }
                 ?: defaults.mapRingLineStyle,
+            mapLabelSize = prefs[Keys.mapLabelSize]
+                ?.let { runCatching { MapLabelSize.valueOf(it) }.getOrNull() }
+                ?: defaults.mapLabelSize,
+            mapLabelColor = prefs[Keys.mapLabelColor]
+                ?.takeIf { it.isNotBlank() }
+                ?.let { runCatching { RingColorPreset.valueOf(it) }.getOrNull() },
+            offlineRadiusNm = prefs[Keys.offlineRadiusNm] ?: defaults.offlineRadiusNm,
         )
     }
 
@@ -137,6 +148,9 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.mapRingColor]       = config.mapRingColor.name
             prefs[Keys.mapRingWidth]       = config.mapRingWidth.name
             prefs[Keys.mapRingLineStyle]   = config.mapRingLineStyle.name
+            prefs[Keys.mapLabelSize]       = config.mapLabelSize.name
+            prefs[Keys.mapLabelColor]      = config.mapLabelColor?.name ?: ""
+            prefs[Keys.offlineRadiusNm]    = config.offlineRadiusNm
         }
     }
 }

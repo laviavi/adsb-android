@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.laviavi.adsbandroid.offline.NetworkState
 import com.laviavi.adsbandroid.offline.SavedRegion
+import com.laviavi.adsbandroid.pipeline.AppConfig
+import com.laviavi.adsbandroid.ui.settings.EditableStepperRow
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 import java.text.SimpleDateFormat
@@ -82,12 +84,21 @@ fun OfflineMapsScreen(
                         style = MaterialTheme.typography.bodyLarge, color = AdsbColors.TextPrimary,
                     )
                     Text(
-                        "${OfflineMapsViewModel.RADIUS_NM.toInt()} nm radius, using the currently selected base map. " +
-                            "Downloads only over unmetered Wi-Fi.",
+                        "Uses the currently selected base map. Downloads only over unmetered Wi-Fi.",
                         style = MaterialTheme.typography.labelSmall, color = AdsbColors.TextSecondary,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                     Spacer(Modifier.height(10.dp))
+                    EditableStepperRow(
+                        label = "Radius",
+                        value = state.radiusNm,
+                        min = AppConfig.OFFLINE_RADIUS_MIN_NM,
+                        max = AppConfig.OFFLINE_RADIUS_MAX_NM,
+                        step = AppConfig.OFFLINE_RADIUS_STEP_NM,
+                        unit = "nm",
+                        onValueChange = { viewModel.setRadius(it) },
+                    )
+                    Spacer(Modifier.height(4.dp))
                     if (state.isDownloading) {
                         val p = state.downloadProgress
                         val fraction = if (p != null && p.required > 0) (p.completed.toFloat() / p.required) else 0f
