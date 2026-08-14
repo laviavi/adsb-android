@@ -2239,3 +2239,61 @@ follow-up decision:**
 `:core:receiver:test` + `:app:testDebugUnitTest` pass, 11 new tests, 0
 failures. Version bumped to v1.6.14 (`versionCode` 29), debug APK built and
 added to `dist/`.
+
+## 44. Map zoom race fix, ring contrast, Layers panel auto-close, EditableStepperRow for auto-stop/GPS refresh, combined+rounded GPS location field (2026-08-14, v1.6.15)
+
+Seven-item punch list from Avi.
+
+**+/- zoom buttons genuinely did nothing, on every basemap** (the widened
+6-step ladder in §42 didn't fix it — root cause was elsewhere). Found it:
+`MapScreen.kt:241-246` had two `LaunchedEffect`s both keyed on `rangeStep` —
+one re-centers on the observer (`animateTo`), the other zooms
+(`zoomTo(…, 300L)`). `followObserver` defaults `true` and only flips off
+once the map is dragged once, so on a fresh screen every `+`/`-` tap fired
+**both** camera animations in the same frame; osmdroid running a pan
+animation and a zoom animation concurrently silently swallows one of them.
+Fix: dropped `rangeStep` from the recenter effect's keys — recentering only
+needs to happen when `followObserver` toggles on or the observer's own
+position moves, not when the zoom range changes.
+
+**Range ring contrast.** `AircraftOverlay.kt`'s ring alpha (`0.08–0.22`) was
+tuned for one color (cyan) against one basemap look before 6 ring colors and
+6 basemaps existed. Added a dark (`AndroidColor.BLACK`) halo stroke —
+`ringHaloPaint`, 2dp wider than the ring itself, drawn first — under the
+main colored stroke (`drawRings()`), same treatment for ring labels via a
+new `ringLabelHaloPaint` (stroke-style text drawn under the fill). Base
+alpha raised to `0.30–0.55`. Standard cartography technique (the reason map
+labels/lines everywhere get an outline) — guarantees contrast regardless of
+ring color × basemap combination rather than needing per-combination tuning.
+
+**Layers panel auto-closes on basemap pick** (`MapScreen.kt` `LayersPanel`'s
+`BaseMap.entries.forEach` `OptionRow`) — `onClose()` added after
+`onConfigChange`. Ring color/width/style pickers deliberately left open
+(multi-adjustment, unlike a one-shot basemap pick).
+
+**Auto-stop and GPS refresh interval converted from 5-6 preset `OptionRow`s
+to `EditableStepperRow`** (`ui/settings/SettingsComponents.kt:336`, Avi's
+established "Editable Stepper" pattern — `[ − | typed value | + ] unit`,
+already used for accept-rate settings) — typed input + step buttons instead
+of a fixed option list. Auto-stop: 1-60 min, step 1 (`0` still means "stay
+running", built into `EditableStepperRow`'s existing Off semantics). GPS
+refresh: 15-360 min, step 15. `WATCHDOG_OPTIONS`/`GPS_REFRESH_OPTIONS`
+constants deleted (no longer referenced anywhere).
+
+**Observer coordinates**: "FALLBACK COORDINATES" label renamed to "My
+location" (kept "Coordinates" for fixed-mode, not GPS-fallback, per Avi's
+literal ask). The two separate Latitude/Longitude `SettingsField` boxes
+merged into one `"lat, lon"` field, split/parsed on edit. New
+`Double.roundToGpsPrecision()` (`AppConfig.kt`, one-line extension —
+`round(x * 1e6) / 1e6`) applied both at manual entry and at the "Update
+GPS" fresh-fix path (`PipelineService.kt:591`) — GPS hardware accuracy tops
+out around 5-6 meaningful decimal digits (~11cm/digit at 6dp), anything
+beyond was floating-point noise the field was displaying as if it meant
+something. The continuous GPS-follow path (`onGpsFix`/`observerPosition`,
+line ~619) deliberately left untouched — that's an ephemeral live-tracking
+value never shown in a text field, out of scope for this ask.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass (no new pure logic —
+UI wiring + a trivial one-line rounding extension, not worth a dedicated
+test per this session's established bar). Version bumped to v1.6.15
+(`versionCode` 30), debug APK built and added to `dist/`.

@@ -60,9 +60,21 @@ class AircraftOverlay(
         style = Paint.Style.STROKE
         strokeWidth = px(1f)
     }
+    /** Dark outline drawn under [ringPaint] so a ring reads against any basemap brightness/color, not just a dark one. */
+    private val ringHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = AndroidColor.BLACK
+    }
     private val ringLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.MONOSPACE
         textSize = px(10f)
+    }
+    private val ringLabelHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.MONOSPACE
+        textSize = px(10f)
+        style = Paint.Style.STROKE
+        strokeWidth = px(2f)
+        color = AndroidColor.BLACK
     }
     private val observerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -161,9 +173,15 @@ class AircraftOverlay(
         val cx = point.x.toFloat()
         val cy = point.y.toFloat()
 
+        val cap = if (ringLineStyle == RingLineStyle.DOTTED) Paint.Cap.ROUND else Paint.Cap.BUTT
+        val effect = pathEffectFor(ringLineStyle)
         ringPaint.strokeWidth = px(ringWidthDp)
-        ringPaint.pathEffect = pathEffectFor(ringLineStyle)
-        ringPaint.strokeCap = if (ringLineStyle == RingLineStyle.DOTTED) Paint.Cap.ROUND else Paint.Cap.BUTT
+        ringPaint.pathEffect = effect
+        ringPaint.strokeCap = cap
+        // 2dp wider than the ring itself so the dark edge shows on both sides.
+        ringHaloPaint.strokeWidth = px(ringWidthDp + 2f)
+        ringHaloPaint.pathEffect = effect
+        ringHaloPaint.strokeCap = cap
         ringLabelPaint.color = ringColorArgb
 
         ringRadiiNm.forEachIndexed { i, radiusNm ->
@@ -171,14 +189,25 @@ class AircraftOverlay(
             if (radiusPx <= 0f) return@forEachIndexed
             // Outer rings fade, innermost strongest — scales to however many rings
             // are configured (up to AppConfig.MAX_MAP_RINGS) rather than a fixed count.
-            val alpha = (0.22f - i * 0.03f).coerceAtLeast(0.08f)
+            // Raised from a 0.08-0.22 floor/ceiling: that range was tuned for one
+            // color against one basemap and read as barely-there once 6 ring colors
+            // and 6 basemaps were added.
+            val alpha = (0.55f - i * 0.05f).coerceAtLeast(0.30f)
+            val alphaInt = (alpha * 255).roundToInt()
+
+            ringHaloPaint.alpha = alphaInt
+            canvas.drawCircle(cx, cy, radiusPx, ringHaloPaint)
             ringPaint.color = ringColorArgb
-            ringPaint.alpha = (alpha * 255).roundToInt()
+            ringPaint.alpha = alphaInt
             canvas.drawCircle(cx, cy, radiusPx, ringPaint)
 
             ringLabels.getOrNull(i)?.let { label ->
+                val x = cx + px(4f)
+                val y = cy - radiusPx - px(3f)
+                ringLabelHaloPaint.alpha = 200
+                canvas.drawText(label, x, y, ringLabelHaloPaint)
                 ringLabelPaint.alpha = 200
-                canvas.drawText(label, cx + px(4f), cy - radiusPx - px(3f), ringLabelPaint)
+                canvas.drawText(label, x, y, ringLabelPaint)
             }
         }
     }

@@ -588,7 +588,10 @@ class PipelineService : Service() {
                 onResult(false)
                 return@launch
             }
-            val updated = currentConfig.copy(observerLatitude = fix.latitude, observerLongitude = fix.longitude)
+            val updated = currentConfig.copy(
+                observerLatitude = fix.latitude.roundToGpsPrecision(),
+                observerLongitude = fix.longitude.roundToGpsPrecision(),
+            )
             _config.value = updated
             withContext(Dispatchers.IO) { runCatching { configStore.save(updated) } }
             applyObserverPosition()

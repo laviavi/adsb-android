@@ -159,6 +159,9 @@ data class AppConfig(
     }
 }
 
+/** GPS hardware accuracy tops out around 5-6 meaningful decimal digits (~11cm/digit); anything beyond is float noise. */
+fun Double.roundToGpsPrecision(): Double = kotlin.math.round(this * 1_000_000.0) / 1_000_000.0
+
 /**
  * Which settings actually disturb a live receiver session.
  *

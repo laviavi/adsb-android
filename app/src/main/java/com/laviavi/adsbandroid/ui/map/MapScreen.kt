@@ -238,7 +238,13 @@ fun MapScreen(
         mapView.invalidate()
     }
 
-    LaunchedEffect(followObserver, observer, rangeStep) {
+    // rangeStep is deliberately not a key here: recentering only makes sense when
+    // follow turns on or the observer's own position moves, not when the zoom range
+    // changes. Including it used to fire this alongside the zoomTo() effect below on
+    // every +/- press, and osmdroid running a pan animation and a zoom animation in
+    // the same frame silently swallowed one of them — the button appeared to do
+    // nothing at all, on every basemap.
+    LaunchedEffect(followObserver, observer) {
         if (followObserver) mapView.controller.animateTo(observer)
     }
     LaunchedEffect(rangeStep) {
@@ -592,7 +598,10 @@ private fun LayersPanel(
                     OptionRow(
                         label = map.label,
                         selected = config.mapBaseMap == map,
-                        onClick = { onConfigChange(config.copy(mapBaseMap = map)) },
+                        onClick = {
+                            onConfigChange(config.copy(mapBaseMap = map))
+                            onClose()
+                        },
                     )
                 }
             }

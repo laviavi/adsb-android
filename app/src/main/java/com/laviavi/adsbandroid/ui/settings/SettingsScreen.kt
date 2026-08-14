@@ -28,19 +28,12 @@ import com.laviavi.adsbandroid.capture.RtlTcpGain
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.offline.ConfigurableTileDownloader
 import com.laviavi.adsbandroid.pipeline.AppConfig
+import com.laviavi.adsbandroid.pipeline.roundToGpsPrecision
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.laviavi.adsbandroid.ui.MainViewModel
 import com.laviavi.adsbandroid.ui.components.ExitConfirmDialog
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 
-private val GPS_REFRESH_OPTIONS = listOf(
-    0 to "Off", 15 to "15 minutes", 30 to "30 minutes",
-    60 to "1 hour", 120 to "2 hours", 360 to "6 hours",
-)
-private val WATCHDOG_OPTIONS = listOf(
-    0 to "Off (stay running)", 1 to "1 minute", 5 to "5 minutes",
-    10 to "10 minutes", 15 to "15 minutes", 30 to "30 minutes",
-)
 
 /** Which settings surface is showing. Tuner options live on their own page. */
 private enum class SettingsPage { ROOT, TUNER }
@@ -422,32 +415,32 @@ private fun ObserverSection(
                 )
             }
             Spacer(Modifier.height(4.dp))
-            Text(
-                "GPS REFRESH INTERVAL",
-                style = MaterialTheme.typography.labelMedium,
-                color = AdsbColors.TextSecondary,
+            EditableStepperRow(
+                label = "GPS refresh interval",
+                value = config.gpsRefreshIntervalMinutes,
+                min = 15,
+                max = 360,
+                step = 15,
+                unit = "min",
+                onValueChange = { onChange(config.copy(gpsRefreshIntervalMinutes = it)) },
             )
-            GPS_REFRESH_OPTIONS.forEach { (minutes, label) ->
-                OptionRow(
-                    label = label,
-                    selected = config.gpsRefreshIntervalMinutes == minutes,
-                    onClick = { onChange(config.copy(gpsRefreshIntervalMinutes = minutes)) },
-                )
-            }
         }
 
         Spacer(Modifier.height(4.dp))
-        Text(
-            if (config.observerMode == ObserverMode.FOLLOW_GPS)
-                "FALLBACK COORDINATES" else "COORDINATES",
-            style = MaterialTheme.typography.labelMedium,
-            color = AdsbColors.TextSecondary,
-        )
-        SettingsField(config.observerLatitude.toString(), "Latitude") {
-            it.toDoubleOrNull()?.let { v -> onChange(config.copy(observerLatitude = v)) }
-        }
-        SettingsField(config.observerLongitude.toString(), "Longitude") {
-            it.toDoubleOrNull()?.let { v -> onChange(config.copy(observerLongitude = v)) }
+        SettingsField(
+            value = "%.6f, %.6f".format(config.observerLatitude, config.observerLongitude),
+            label = if (config.observerMode == ObserverMode.FOLLOW_GPS) "My location" else "Coordinates",
+            placeholder = "latitude, longitude",
+        ) { text ->
+            val parts = text.split(",").map { it.trim() }
+            val lat = parts.getOrNull(0)?.toDoubleOrNull()
+            val lon = parts.getOrNull(1)?.toDoubleOrNull()
+            if (lat != null && lon != null) {
+                onChange(config.copy(
+                    observerLatitude = lat.roundToGpsPrecision(),
+                    observerLongitude = lon.roundToGpsPrecision(),
+                ))
+            }
         }
 
         Spacer(Modifier.height(4.dp))
@@ -492,13 +485,15 @@ private fun ObserverSection(
 @Composable
 private fun PowerSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
     SettingsSection("Auto-stop", "Stops the receiver if the dongle is absent, to save battery.") {
-        WATCHDOG_OPTIONS.forEach { (minutes, label) ->
-            OptionRow(
-                label = label,
-                selected = config.sourceWatchdogTimeoutMinutes == minutes,
-                onClick = { onChange(config.copy(sourceWatchdogTimeoutMinutes = minutes)) },
-            )
-        }
+        EditableStepperRow(
+            label = "Auto-stop after",
+            value = config.sourceWatchdogTimeoutMinutes,
+            min = 1,
+            max = 60,
+            step = 1,
+            unit = "min",
+            onValueChange = { onChange(config.copy(sourceWatchdogTimeoutMinutes = it)) },
+        )
     }
 }
 
