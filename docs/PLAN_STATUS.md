@@ -2496,3 +2496,23 @@ technique already tested elsewhere in the codebase. Version bumped to
 v2.0.1 (`versionCode` 33), debug APK built and added to `dist/`. Not
 visually verified, same standing caveat as §45 — no device connected, no
 external browser access in this sandbox.
+
+## 47. APK size: restrict to arm64-v8a only (2026-08-14, v2.0.2)
+
+The 68MB APK size flagged in §45 traced to a real, measured cause: unzipped
+`dist/adsb-android-v2.0.1.apk` and summed `lib/<abi>/*.so` — MapLibre's
+native library ships prebuilt for 4 ABIs (arm64-v8a 12.4MB, armeabi-v7a
+9.0MB, x86 12.7MB, x86_64 12.7MB, ~47MB total), and the build had no ABI
+filter, so all 4 shipped in one APK even though any one device only ever
+uses one. This app is side-loaded onto Avi's one phone (Samsung SM-S928B,
+arm64), not distributed via Play — no reason to carry the other three.
+
+`app/build.gradle.kts`: `defaultConfig { ndk { abiFilters += "arm64-v8a" } }`.
+Rebuilt and re-measured, not assumed: **68MB → 35.4MB**, single
+`arm64-v8a` `.so` confirmed via the same unzip-and-sum check.
+`:core:receiver:test` + `:app:testDebugUnitTest` pass. Version bumped to
+v2.0.2 (`versionCode` 34), debug APK built and added to `dist/`.
+
+If this app is ever built for a different device (an x86 emulator, an
+older 32-bit phone), the `abiFilters` line needs the matching ABI added or
+removed — this is a hard filter, not a fallback.

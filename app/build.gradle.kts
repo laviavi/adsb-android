@@ -15,8 +15,12 @@ android {
         applicationId = "com.laviavi.adsbandroid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
-        versionName = "2.0.1"
+        versionCode = 34
+        versionName = "2.0.2"
+        // This app is side-loaded onto one specific phone (arm64), not distributed
+        // broadly via Play — MapLibre's native library otherwise bundles all 4 ABIs
+        // (~47MB of the APK), 3 of which this build never runs on.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
