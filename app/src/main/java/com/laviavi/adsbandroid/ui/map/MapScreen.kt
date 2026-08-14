@@ -193,6 +193,10 @@ fun MapScreen(
     DisposableEffect(mapView, overlay) {
         val touch = object : Overlay() {
             override fun onSingleTapConfirmed(e: MotionEvent, m: MapView): Boolean {
+                // A tap on the map itself (not the panel, which sits above this
+                // overlay and consumes its own touches first) dismisses the Layers
+                // panel — same as tapping outside any other open panel/menu.
+                if (layersOpen) layersOpen = false
                 val hit = overlay.hitTest(m, e.x, e.y)
                 // Re-tapping the selected marker is a no-op, so panning with a
                 // selection active can never deselect by accident.
@@ -598,10 +602,7 @@ private fun LayersPanel(
                     OptionRow(
                         label = map.label,
                         selected = config.mapBaseMap == map,
-                        onClick = {
-                            onConfigChange(config.copy(mapBaseMap = map))
-                            onClose()
-                        },
+                        onClick = { onConfigChange(config.copy(mapBaseMap = map)) },
                     )
                 }
             }

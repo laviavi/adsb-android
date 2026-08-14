@@ -2297,3 +2297,14 @@ value never shown in a text field, out of scope for this ask.
 UI wiring + a trivial one-line rounding extension, not worth a dedicated
 test per this session's established bar). Version bumped to v1.6.15
 (`versionCode` 30), debug APK built and added to `dist/`.
+
+**Correction (v1.6.16)**: item 3 above was the wrong behavior — Avi wanted
+the Layers panel to close on tapping the *map*, not on picking a basemap
+(basemap selection now behaves like every other Layers control: applies
+and stays open). Reverted the `onClose()` call in the basemap `OptionRow`.
+Added the actual fix in the map's touch overlay
+(`MapScreen.kt` `onSingleTapConfirmed`, `DisposableEffect(mapView, overlay)`
+block): a tap on the map itself now sets `layersOpen = false` first, before
+its existing marker-hit-test logic runs — same "tap outside to dismiss"
+convention as any other open panel/menu. `:app:testDebugUnitTest` +
+`:app:assembleDebug` pass. Version bumped to v1.6.16 (`versionCode` 31).
