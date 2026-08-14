@@ -76,7 +76,6 @@ class PipelineService : Service() {
     @Inject lateinit var bestRangeDao: com.laviavi.adsbandroid.data.BestRangeDao
     @Inject lateinit var enrichmentDao: EnrichmentCacheDao
     @Inject lateinit var aircraftMetaCacheDao: AircraftMetaCacheDao
-    @Inject lateinit var offlineMapManager: com.laviavi.adsbandroid.offline.OfflineMapManager
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
@@ -619,24 +618,9 @@ class PipelineService : Service() {
     private fun onGpsFix(location: Location) {
         observerPosition.applyLiveFix(location.latitude, location.longitude)
         applyObserverPosition()
-        noteTravel(location.latitude, location.longitude)
         val params = gpsThrottle.onFix(location.latitude, location.longitude)
         if (GpsPolicy.shouldRunContinuousGps(currentConfig.observerMode, _sourceState.value is SourceState.Running)) {
             locationProvider.startUpdates(params, ::onGpsFix)
-        }
-    }
-
-    /**
-     * Records movement outside stored offline coverage.
-     *
-     * Writes a note only — no tiles are fetched here and the network is never
-     * consulted, which is what makes it safe to run while travelling on cellular.
-     * Off the main thread because it reads the manifest from disk.
-     */
-    private fun noteTravel(lat: Double, lon: Double) {
-        serviceScope.launch(Dispatchers.IO) {
-            runCatching { offlineMapManager.observePosition(lat, lon) }
-                .onFailure { ErrorLog.warn("Travel tracking skipped: ${it.message}") }
         }
     }
 

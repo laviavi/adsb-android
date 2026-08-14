@@ -2308,3 +2308,125 @@ block): a tap on the map itself now sets `layersOpen = false` first, before
 its existing marker-hit-test logic runs — same "tap outside to dismiss"
 convention as any other open panel/menu. `:app:testDebugUnitTest` +
 `:app:assembleDebug` pass. Version bumped to v1.6.16 (`versionCode` 31).
+
+## 45. v2.0 — osmdroid/raster replaced by MapLibre + OpenFreeMap vector tiles (2026-08-14)
+
+Full map-rendering-engine replacement, per Avi's explicit direction (freeze
+v1.6.16 as a base copy first — done, `adsb-android-v1.6.16-20260814/` inside
+the repo root, source-only, gitignored, same convention as the prior
+v0.x/v1.x snapshots). Scope, confirmed with Avi before coding: full
+replacement (not an added option), offline required day one, full aircraft
+overlay parity in one pass — the largest single change this session.
+
+**Dependency**: `org.maplibre.gl:android-sdk`. Latest (13.5.0) needs Kotlin
+2.2 metadata; this project is on 2.0.21 and bumping the whole toolchain
+would cascade into KSP/Compose-compiler/Hilt versions too — pinned `12.0.0`
+instead, verified with a real `:app:compileDebugKotlin` run, not assumed.
+Real API surface (class list, method signatures) confirmed by inspecting
+the downloaded AAR directly with `javap` — this sandbox can't reach
+maplibre.org's docs (browsing blocked), so nothing here is from memory of
+the old Mapbox SDK it forked from.
+
+**`BaseMap`** (`core/receiver/.../map/BaseMap.kt`): raster `urlTemplate`/
+`labelUrlTemplate` replaced by a single `styleUrl` per entry — 4 verified-live
+OpenFreeMap styles (`tiles.openfreemap.org/styles/{liberty,bright,positron,dark}`,
+all confirmed 200 with real MapLibre style JSON). Default changed
+`BaseMap.OSM` → `BaseMap.LIBERTY`.
+
+**`MapScreen.kt`**: osmdroid's synchronous `MapView`/`controller` replaced
+with MapLibre's async `MapView.getMapAsync{}` → `MapLibreMap.setStyle{}`
+lifecycle. The two-effect camera bug fixed in §44 doesn't exist in the new
+code by construction — recenter and zoom are now one `LaunchedEffect`
+computing a single combined `CameraUpdateFactory.newLatLngZoom()` call,
+not two effects that could race. `computeZoom()`'s web-mercator math is
+unchanged (MapLibre uses the same zoom-level convention). Base-map switching
+calls `setStyle()`, which — a real architectural difference from raster —
+**discards every previously added source/layer**, so a new aircraft-overlay
+object is rebuilt against the new `Style` on every switch, not reused.
+
+**New `ui/map/AircraftMapLayer.kt`** replaces the old Canvas-`Overlay`-based
+`AircraftOverlay.kt` (deleted): GeoJSON sources + style layers instead of a
+`draw()` loop. Per-feature visuals (shape/color/rotation/opacity) are
+computed in Kotlin exactly like the old `drawMarker()` did, and relayed via
+plain `Expression.get()` — deliberately avoiding complex `match`/`switchCase`
+style expressions neither testable nor verifiable on-device from here.
+Range rings are geodesic circle polygons (`AircraftMapLayer.circlePoints()`,
+haversine destination-point formula, new `AircraftMapLayerTests.kt`, 4
+tests) rendered via `LineLayer` — MapLibre's `CircleLayer` radius is
+screen-pixels, not geographic distance, so it would not have kept the
+"this ring is N real nautical miles" property across zoom the way the old
+Canvas rings did. Selection/RA/emergency rings are filtered `CircleLayer`s;
+labels are two `SymbolLayer`s (collision-managed default + an always-shown
+one for selected/RA/emergency, `text-allow-overlap` + a filter — native
+primitives doing what the old custom label-collision grid hash did by hand).
+Clustering keeps the exact old trigger thresholds (>150 total, or zoom<8
+with ≥20) computed in Kotlin, but hands the actual grouping to MapLibre's
+native `GeoJsonSource` clustering once triggered — a different underlying
+algorithm (radius-based) than the old fixed 90px screen grid, so cluster
+bubble boundaries won't be pixel-identical, just conceptually the same.
+**Known, deliberate visual approximations, not oversights**: stale aircraft
+render dimmed (`icon-opacity`) rather than truly hollow-outline (no
+single-bitmap way to do stroke-only recoloring via `icon-color`); label
+backgrounds are a `text-halo` glow instead of a solid rectangle (`SymbolLayer`
+has no built-in background box).
+
+**Offline maps — not a port, a replacement, and it had to be.** The v1
+system (`core/receiver/.../offline/*` + `app/.../offline/AndroidOfflineAdapters.kt`
++ `OsmTileDownloader.kt`/`OsmdroidCacheSource.kt`, ~2,900 lines total:
+manifest/segment tracking, radius+detail byte estimation, cache import,
+append-to-existing-segment targeting, travel-suggestion prompts, resumable
+downloads) was built entirely around raster tiles being individually
+addressable `z/x/y.png` files on disk. MapLibre's native offline model
+(`OfflineManager`/`OfflineRegion`, real API verified via `javap`, not
+guessed) manages vector tiles + sprites + glyphs + style JSON together as
+one opaque, natively-cached region — no per-tile file access, no cheap
+pre-download byte estimate, no cache import, no append/merge. None of that
+sophistication has an equivalent to port to. Deleted outright: `OfflineMapManager.kt`,
+`AppendTargeting.kt`, `TravelCoverage.kt`, `SegmentNaming.kt`,
+`OfflineSegment.kt`, `OfflinePorts.kt`, `TileGeometry.kt`, `OfflineRadius.kt`,
+`OsmTileDownloader.kt`, `OsmdroidCacheSource.kt`, and every test file
+exercising them (5 core:receiver test classes, 2 app-side). Kept: `NetworkEligibility.kt`
+(Wi-Fi-only gating — pure policy, tile-format-agnostic) and `AndroidLocationNamer`
+(reverse-geocoding for a downloaded area's display name) — both genuinely
+reusable. New `MapLibreOfflineRepository.kt` wraps `OfflineManager` in
+suspend functions/a `Flow<OfflineDownloadEvent>`; `RegionMeta` (name +
+timestamp, stashed in a region's opaque metadata bytes) uses manual
+newline-delimited encoding rather than kotlinx.serialization — `:app` never
+carried that compiler plugin (only `:core:receiver` does), not worth adding
+for two fields (new `RegionMetaTests.kt`, 4 tests). `OfflineMapsViewModel.kt`/
+`OfflineMapsScreen.kt` rewritten to the simpler model: one fixed-radius
+(50nm, zoom 4–12) "download around current position" action, a list of
+saved regions with delete — no radius/detail picker, no import, no append,
+no travel suggestions. `PipelineService.kt`'s travel-tracking hook
+(`noteTravel()`, called from `onGpsFix`) deleted — it only ever called into
+the now-gone travel-coverage system. `AppConfig`'s raster-download-endpoint
+fields (`offlineTileUrlTemplate`, `offlineDownloadEnabled`, `offlineDownloadConfigured`,
+`effectiveTileUrlTemplate`) and Settings' "Offline map source" section
+removed — meaningless once there's no separate download-endpoint concept.
+`AppConfig.offlineMode` itself (the broader "stop all internet use" toggle,
+also gates enrichment) is unrelated and untouched.
+
+**Also removed**: the `osmdroid-android` Gradle dependency (`libs.versions.toml`,
+`app/build.gradle.kts`) — nothing references it anymore.
+
+**Testing, and its real limits.** `:core:receiver:test` (319) +
+`:app:testDebugUnitTest` (90) pass, 0 failures — down from the pre-v2.0
+counts because ~85 tests exercised the deleted raster offline system; up by
+8 new tests (`AircraftMapLayerTests`, `RegionMetaTests`) for the new pure
+logic that has any. `:app:assembleDebug` succeeds — real APK, real
+`libmaplibre.so` packaged (confirmed in the build log), 71.5 MB debug build
+(up from ~22 MB; MapLibre's native library is much larger than pure-Kotlin
+osmdroid — expected, not a leak). **What none of this proves**: this
+sandbox has no connected device (`adb devices -l` empty) and this
+environment's browser is blocked from external sites, so nothing here has
+been visually verified — not the map actually rendering OpenFreeMap tiles
+on a real screen, not marker/ring/trail/cluster rendering, not the async
+`getMapAsync`/`setStyle` lifecycle behaving correctly under real GPU/native
+timing, not offline downloads actually completing against a real network.
+Compiling and passing unit tests is real signal that the code is
+structurally sound and grounded in the real MapLibre API — it is not the
+same as having seen it work. On-device verification is the required next
+step before trusting this, more so than any other change this session.
+
+Version bumped to v2.0.0 (`versionCode` 32), debug APK built and added to
+`dist/`.

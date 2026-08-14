@@ -15,8 +15,8 @@ android {
         applicationId = "com.laviavi.adsbandroid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "1.6.16"
+        versionCode = 32
+        versionName = "2.0.0"
     }
 
     buildTypes {
@@ -67,7 +67,7 @@ dependencies {
     implementation(libs.compose.viewmodel)
     implementation(libs.compose.navigation)
     implementation(libs.lifecycle.runtime.compose)
-    implementation(libs.osmdroid.android)
+    implementation(libs.maplibre.android)
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.lifecycle.runtime)

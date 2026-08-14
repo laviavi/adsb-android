@@ -39,8 +39,6 @@ class AppConfigStore(private val context: Context) {
         val gpsRefreshMin   = intPreferencesKey("gps_refresh_interval_minutes")
         val watchdogMin     = intPreferencesKey("source_watchdog_timeout_minutes")
         val offlineMode          = booleanPreferencesKey("offline_mode")
-        val offlineTileUrl       = stringPreferencesKey("offline_tile_url_template")
-        val offlineDownload      = booleanPreferencesKey("offline_download_enabled")
         val sortOrder            = stringPreferencesKey("aircraft_sort_order")
         val lowAcceptRateAlert   = intPreferencesKey("low_accept_rate_alert_pct")
         val acceptRateWindow     = intPreferencesKey("accept_rate_window_seconds")
@@ -71,8 +69,6 @@ class AppConfigStore(private val context: Context) {
             aircraftExpirySeconds = prefs[Keys.expirySeconds] ?: defaults.aircraftExpirySeconds,
             enrichmentEnabled     = prefs[Keys.enrichment] ?: defaults.enrichmentEnabled,
             offlineMode           = prefs[Keys.offlineMode] ?: defaults.offlineMode,
-            offlineTileUrlTemplate = prefs[Keys.offlineTileUrl] ?: defaults.offlineTileUrlTemplate,
-            offlineDownloadEnabled = prefs[Keys.offlineDownload] ?: defaults.offlineDownloadEnabled,
             rawLoggingEnabled     = prefs[Keys.rawLogging] ?: defaults.rawLoggingEnabled,
             observerLatitude      = prefs[Keys.observerLat] ?: defaults.observerLatitude,
             observerLongitude     = prefs[Keys.observerLon] ?: defaults.observerLongitude,
@@ -122,8 +118,6 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.expirySeconds] = config.aircraftExpirySeconds
             prefs[Keys.enrichment]    = config.enrichmentEnabled
             prefs[Keys.offlineMode]   = config.offlineMode
-            prefs[Keys.offlineTileUrl] = config.offlineTileUrlTemplate
-            prefs[Keys.offlineDownload] = config.offlineDownloadEnabled
             prefs[Keys.rawLogging]    = config.rawLoggingEnabled
             prefs[Keys.observerLat]   = config.observerLatitude
             prefs[Keys.observerLon]   = config.observerLongitude

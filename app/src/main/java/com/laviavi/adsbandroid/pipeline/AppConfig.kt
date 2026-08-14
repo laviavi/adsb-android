@@ -92,7 +92,7 @@ data class AppConfig(
 
     // --- Map layers. Presentation-only; none of these touch the pipeline. ---
     /** Which tile source the live map renders. Independent of [offlineTileUrlTemplate]. */
-    val mapBaseMap: BaseMap             = BaseMap.OSM,
+    val mapBaseMap: BaseMap             = BaseMap.LIBERTY,
     val mapShowRangeRings: Boolean      = true,
     val mapShowLabels: Boolean          = true,
     val mapShowGroundTraffic: Boolean   = true,
@@ -108,24 +108,7 @@ data class AppConfig(
     val mapRingColor: RingColorPreset   = RingColorPreset.CYAN,
     val mapRingWidth: RingWidth         = RingWidth.THIN,
     val mapRingLineStyle: RingLineStyle = RingLineStyle.SOLID,
-
-    /**
-     * Tile endpoint for *downloading* offline maps, with `{z}`/`{x}`/`{y}` placeholders.
-     *
-     * Defaults to the same OpenStreetMap Mapnik source the live map uses. Downloads are
-     * gated by [offlineDownloadEnabled] so the URL being set does not itself start any
-     * network activity — the user opts in explicitly with the toggle.
-     */
-    val offlineTileUrlTemplate: String  = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    /** When false, offline map downloads are inert; import from cache still works. */
-    val offlineDownloadEnabled: Boolean = false,
 ) {
-    /** Downloads are possible only when the toggle is on and an endpoint is named. Import always is. */
-    val offlineDownloadConfigured: Boolean get() = offlineDownloadEnabled && offlineTileUrlTemplate.isNotBlank()
-
-    /** URL exposed to the downloader — blank when downloads are disabled, so the downloader stays inert. */
-    val effectiveTileUrlTemplate: String get() = if (offlineDownloadEnabled) offlineTileUrlTemplate else ""
-
     /**
      * The only thing enrichment call sites should test. A derived getter rather
      * than a stored field so no `copy()` can produce a state where offline mode is

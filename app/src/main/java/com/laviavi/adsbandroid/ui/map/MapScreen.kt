@@ -1,6 +1,5 @@
 package com.laviavi.adsbandroid.ui.map
 
-import android.view.MotionEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,41 +43,11 @@ import com.laviavi.adsbandroid.ui.settings.SettingsField
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 import com.laviavi.adsbandroid.units.DistanceUnit
-import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.ITileSource
-import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.util.MapTileIndex
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Overlay
-
-/**
- * Builds a live tile source from a `{z}/{x}/{y}`-style template — the same
- * placeholder convention `offline/OsmTileDownloader.kt` uses for downloads,
- * adapted here to osmdroid's own tile-loading interface since the base map can
- * change while the screen is open (unlike `TileSourceFactory.MAPNIK`, a fixed
- * singleton with no template to swap).
- */
-private fun buildTileSource(name: String, urlTemplate: String): ITileSource =
-    object : OnlineTileSourceBase(name, 0, 19, 256, "", arrayOf(urlTemplate)) {
-        override fun getTileURLString(pMapTileIndex: Long): String = urlTemplate
-            .replace("{z}", MapTileIndex.getZoom(pMapTileIndex).toString())
-            .replace("{x}", MapTileIndex.getX(pMapTileIndex).toString())
-            .replace("{y}", MapTileIndex.getY(pMapTileIndex).toString())
-    }
-
-private fun buildTileSource(baseMap: BaseMap): ITileSource = buildTileSource(baseMap.name, baseMap.urlTemplate)
-
-/** The transparent labels/boundaries overlay for [BaseMap.labelUrlTemplate], or null when the base map has none. */
-private fun buildLabelOverlay(context: android.content.Context, baseMap: BaseMap): org.osmdroid.views.overlay.TilesOverlay? {
-    val template = baseMap.labelUrlTemplate ?: return null
-    val source = buildTileSource("${baseMap.name}Labels", template)
-    val provider = org.osmdroid.tileprovider.MapTileProviderBasic(context, source)
-    return org.osmdroid.views.overlay.TilesOverlay(provider, context).apply {
-        loadingBackgroundColor = android.graphics.Color.TRANSPARENT
-        loadingLineColor = android.graphics.Color.TRANSPARENT
-    }
-}
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
 
 /**
  * Zoom steps a named range scale rather than free zoom levels: the operator thinks
@@ -123,136 +92,104 @@ fun MapScreen(
     var layersOpen by remember { mutableStateOf(false) }
     var selectedIcao by rememberSaveable { mutableStateOf<String?>(null) }
     var shownOfTotal by remember { mutableStateOf(0 to 0) }
+    var currentZoom by remember { mutableDoubleStateOf(computeZoom(RangeStep.DEFAULT.outerNm, minDimPx, observerPosition.first)) }
 
-    val observer = remember(observerPosition) {
-        GeoPoint(observerPosition.first, observerPosition.second)
-    }
+    val observer = remember(observerPosition) { LatLng(observerPosition.first, observerPosition.second) }
     val selected = remember(markers, selectedIcao) {
         selectedIcao?.let { id -> markers.find { it.icao == id } }
     }
 
-    // One MapView for the lifetime of the destination; osmdroid is configured once
-    // with an app-private tile cache so no storage permission is ever needed.
+    // MapLibre requires this before any MapView is created; cheap/idempotent to call repeatedly.
+    remember { MapLibre.getInstance(context) }
+
     val mapView = remember {
-        // load() must run before anything touches the tile provider — without it
-        // osmdroid has no cache path and no user agent, and every tile request is
-        // dropped, leaving a blank map with no error.
-        Configuration.getInstance().apply {
-            load(context, context.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE))
-            userAgentValue = context.packageName
-            osmdroidBasePath = context.filesDir
-            osmdroidTileCache = java.io.File(context.filesDir, "osmdroid/tiles").apply { mkdirs() }
-        }
         MapView(context).apply {
-            setTileSource(buildTileSource(config.mapBaseMap))
-            setMultiTouchControls(true)
-            // Real value applied by the offlineMode effect below; this only sets the
-            // state before the first draw.
-            setUseDataConnection(!config.offlineMode)
-            zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(computeZoom(RangeStep.DEFAULT.outerNm, minDimPx, observer.latitude))
-            controller.setCenter(observer)
-            // The console is a dark instrument; OSM's vector style ships light, so
-            // inverting and desaturating keeps roads/coastlines legible without
-            // competing with the marker palette. Esri's imagery is real satellite
-            // photography — inverting it would turn real-world colors to nonsense,
-            // so only OSM gets the filter.
-            overlayManager.tilesOverlay.setColorFilter(tileFilterFor(config.mapBaseMap))
+            onCreate(null)
         }
     }
-    val overlay = remember { AircraftOverlay(density) }
-    var labelOverlay by remember { mutableStateOf<org.osmdroid.views.overlay.TilesOverlay?>(null) }
+    var map by remember { mutableStateOf<MapLibreMap?>(null) }
+    // Rebuilt every time the style (base map) changes — a new Style instance discards
+    // every previously added source/layer, so the aircraft layer can't be reused across it.
+    var aircraftLayer by remember { mutableStateOf<AircraftMapLayer?>(null) }
 
-    DisposableEffect(Unit) {
-        onDispose { mapView.onDetach() }
-    }
-
-    // Offline mode stops tile downloads; already-cached tiles still render, so the
-    // map degrades to whatever has been visited rather than going blank. Applied in
-    // its own effect because the MapView is remembered for the destination's whole
-    // lifetime — the constructor above runs once and would never see a later toggle.
-    LaunchedEffect(config.offlineMode) {
-        mapView.setUseDataConnection(!config.offlineMode)
-        mapView.invalidate()
-    }
-
-    // Base map can change in Settings while this screen is open — same "remembered
-    // for the destination's whole lifetime" reasoning as the offlineMode effect above.
-    LaunchedEffect(config.mapBaseMap) {
-        mapView.setTileSource(buildTileSource(config.mapBaseMap))
-        mapView.overlayManager.tilesOverlay.setColorFilter(tileFilterFor(config.mapBaseMap))
-        // Esri's imagery carries no place names — its labels overlay is a second,
-        // transparent tile layer drawn on top; inserted at index 0 so it always sits
-        // below the aircraft markers, added later in a separate effect below.
-        labelOverlay?.let { mapView.overlays.remove(it) }
-        labelOverlay = buildLabelOverlay(context, config.mapBaseMap)?.also { mapView.overlays.add(0, it) }
-        mapView.invalidate()
-    }
-
-    // Touch overlay: a tap selects the nearest marker, a drag disables following.
-    DisposableEffect(mapView, overlay) {
-        val touch = object : Overlay() {
-            override fun onSingleTapConfirmed(e: MotionEvent, m: MapView): Boolean {
-                // A tap on the map itself (not the panel, which sits above this
-                // overlay and consumes its own touches first) dismisses the Layers
-                // panel — same as tapping outside any other open panel/menu.
-                if (layersOpen) layersOpen = false
-                val hit = overlay.hitTest(m, e.x, e.y)
-                // Re-tapping the selected marker is a no-op, so panning with a
-                // selection active can never deselect by accident.
-                if (hit != null) {
-                    if (hit.icao != selectedIcao) selectedIcao = hit.icao
-                } else {
-                    selectedIcao = null
-                }
-                m.invalidate()
-                return true
-            }
-
-            override fun onScroll(
-                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float, m: MapView,
-            ): Boolean {
-                if (followObserver) followObserver = false
-                return false
-            }
-        }
-        mapView.overlays.add(overlay)
-        mapView.overlays.add(touch)
+    DisposableEffect(mapView) {
+        mapView.onStart()
+        mapView.onResume()
         onDispose {
-            mapView.overlays.remove(touch)
-            mapView.overlays.remove(overlay)
+            mapView.onPause()
+            mapView.onStop()
+            mapView.onDestroy()
         }
     }
 
-    // Marker updates are a field assignment plus invalidate — never an overlay rebuild.
-    LaunchedEffect(markers, selectedIcao, config, rangeStep, observer) {
-        overlay.markers = markers
-        overlay.observer = observer
-        overlay.selectedIcao = selectedIcao
-        overlay.showRangeRings = config.mapShowRangeRings
-        overlay.showLabels = config.mapShowLabels
-        overlay.showGroundTraffic = config.mapShowGroundTraffic
-        val ringsNm = config.mapRingRadiiMi.sorted().map { DistanceUnit.MILES.toNm(it.toDouble()) }
-        overlay.ringRadiiNm = ringsNm
-        overlay.ringLabels = ringsNm.map { config.distanceUnit.formatWhole(it) }
-        overlay.ringColorArgb = config.mapRingColor.color.toArgb()
-        overlay.ringWidthDp = config.mapRingWidth.dp
-        overlay.ringLineStyle = config.mapRingLineStyle
-        overlay.onDecimated = { shown, total -> shownOfTotal = shown to total }
-        mapView.invalidate()
+    LaunchedEffect(mapView) {
+        mapView.getMapAsync { m ->
+            map = m
+            m.uiSettings.isCompassEnabled = false
+            m.uiSettings.setAttributionMargins(8, 0, 0, 8)
+            m.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                .target(observer)
+                .zoom(computeZoom(RangeStep.DEFAULT.outerNm, minDimPx, observer.latitude))
+                .build()
+            m.addOnCameraIdleListener { currentZoom = m.cameraPosition.zoom }
+            m.addOnMapClickListener { latLng ->
+                if (layersOpen) layersOpen = false
+                val screenPoint = m.projection.toScreenLocation(latLng)
+                val hitIcao = m.queryRenderedFeatures(screenPoint, AircraftMapLayer.LYR_AIRCRAFT_ICONS)
+                    .firstOrNull()?.getStringProperty("icao")
+                selectedIcao = if (hitIcao != null && hitIcao != selectedIcao) hitIcao else if (hitIcao == null) null else selectedIcao
+                true
+            }
+            m.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE && followObserver) {
+                    followObserver = false
+                }
+            }
+        }
     }
 
-    // rangeStep is deliberately not a key here: recentering only makes sense when
-    // follow turns on or the observer's own position moves, not when the zoom range
-    // changes. Including it used to fire this alongside the zoomTo() effect below on
-    // every +/- press, and osmdroid running a pan animation and a zoom animation in
-    // the same frame silently swallowed one of them — the button appeared to do
-    // nothing at all, on every basemap.
-    LaunchedEffect(followObserver, observer) {
-        if (followObserver) mapView.controller.animateTo(observer)
+    // Base map switch: MapLibre's setStyle() replaces the whole Style, wiping every
+    // previously added source/layer — the aircraft layer is rebuilt against the new one.
+    LaunchedEffect(map, config.mapBaseMap) {
+        val m = map ?: return@LaunchedEffect
+        m.setStyle(config.mapBaseMap.styleUrl) { style ->
+            aircraftLayer = AircraftMapLayer(style, density)
+        }
     }
-    LaunchedEffect(rangeStep) {
-        mapView.controller.zoomTo(computeZoom(rangeStep.outerNm, minDimPx, observer.latitude), 300L)
+
+    // One combined camera effect instead of two separately-keyed ones: a past bug had
+    // a recenter effect and a zoom effect both firing on the same rangeStep change,
+    // and the map's pan animation and zoom animation running in the same frame
+    // silently swallowed one of them. Merging them here can't reintroduce that.
+    LaunchedEffect(map, followObserver, observer, rangeStep) {
+        val m = map ?: return@LaunchedEffect
+        val target = if (followObserver) observer else m.cameraPosition.target ?: observer
+        m.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(target, computeZoom(rangeStep.outerNm, minDimPx, target.latitude)),
+            300,
+        )
+    }
+
+    // Marker/ring updates are a field-level GeoJSON refresh, not a layer rebuild.
+    LaunchedEffect(aircraftLayer, markers, selectedIcao, config, observer, currentZoom) {
+        val layer = aircraftLayer ?: return@LaunchedEffect
+        val m = map
+        val result = layer.update(
+            markers = markers,
+            observer = observer,
+            selectedIcao = selectedIcao,
+            showRangeRings = config.mapShowRangeRings,
+            showLabels = config.mapShowLabels,
+            showGroundTraffic = config.mapShowGroundTraffic,
+            ringRadiiNm = config.mapRingRadiiMi.sorted().map { DistanceUnit.MILES.toNm(it.toDouble()) },
+            ringLabels = config.mapRingRadiiMi.sorted().map { config.distanceUnit.formatWhole(DistanceUnit.MILES.toNm(it.toDouble())) },
+            ringColorHex = "#%06X".format(config.mapRingColor.color.toArgb() and 0xFFFFFF),
+            ringWidthPx = config.mapRingWidth.dp,
+            ringDash = null,
+            zoom = currentZoom,
+        )
+        shownOfTotal = result.shown to result.total
+        m?.style?.let { layer.setClusterLayersVisible(result.clustered, it) }
     }
 
     Box(modifier = modifier.fillMaxSize().background(AdsbColors.Background)) {
@@ -276,13 +213,17 @@ fun MapScreen(
             canZoomOut = rangeStep.ordinal < RangeStep.entries.lastIndex,
             onFollow = {
                 followObserver = true
-                mapView.controller.animateTo(observer)
                 // "Show my location" zooms to fit the largest configured ring, not
                 // whatever the +/- stepper happens to be on — the rings can go out
                 // to 250 mi, well past the stepper's fixed range steps.
-                config.mapRingRadiiMi.maxOrNull()?.let { largestMi ->
-                    val nm = DistanceUnit.MILES.toNm(largestMi.toDouble())
-                    mapView.controller.zoomTo(computeZoom(nm, minDimPx, observer.latitude), 300L)
+                val largestMi = config.mapRingRadiiMi.maxOrNull()
+                map?.let { m ->
+                    val zoom = if (largestMi != null) {
+                        computeZoom(DistanceUnit.MILES.toNm(largestMi.toDouble()), minDimPx, observer.latitude)
+                    } else {
+                        computeZoom(rangeStep.outerNm, minDimPx, observer.latitude)
+                    }
+                    m.animateCamera(CameraUpdateFactory.newLatLngZoom(observer, zoom), 300)
                 }
             },
             onLayers = { layersOpen = !layersOpen },
@@ -312,7 +253,7 @@ fun MapScreen(
             SelectionSheet(
                 marker = m,
                 onExpand = { onAircraftClick(m.icao) },
-                onDismiss = { selectedIcao = null; mapView.invalidate() },
+                onDismiss = { selectedIcao = null },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -320,38 +261,10 @@ fun MapScreen(
 }
 
 /**
- * Inverts tile luminance and drops saturation, turning the light Mapnik raster
- * into a dark basemap that sits behind the marker palette instead of fighting it.
- */
-private fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
-    val invert = android.graphics.ColorMatrix(
-        floatArrayOf(
-            -1f, 0f, 0f, 0f, 255f,
-            0f, -1f, 0f, 0f, 255f,
-            0f, 0f, -1f, 0f, 255f,
-            0f, 0f, 0f, 1f, 0f,
-        )
-    )
-    // Desaturate *before* inverting. The other order inverts full-strength hues
-    // first, which turns the blue ocean brown and the parkland magenta; flattening
-    // to near-grey first means inversion only moves luminance.
-    val desaturate = android.graphics.ColorMatrix().apply { setSaturation(0f) }
-    desaturate.postConcat(invert)
-    return android.graphics.ColorMatrixColorFilter(desaturate)
-}
-
-/** Identity matrix — a real, non-null filter so a switch away from OSM definitely clears the invert rather than leaving it in place. */
-private val identityTileFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix())
-
-private fun tileFilterFor(baseMap: BaseMap): android.graphics.ColorMatrixColorFilter =
-    if (baseMap == BaseMap.OSM) darkTileFilter() else identityTileFilter
-
-/**
  * Tile zoom at which the outer ring spans ~80 % of the shorter screen edge.
  *
- * Works in physical pixels, not dp: osmdroid's ground resolution is metres per
- * *pixel*, so feeding it dp on a 2.75x-density screen zooms out by more than a
- * full level and the rings shrink to a dot.
+ * Works in physical pixels, not dp — the same web-mercator ground-resolution
+ * formula osmdroid used; MapLibre's zoom levels are the same standard convention.
  */
 private fun computeZoom(outerNm: Double, minDimPx: Double, latitude: Double): Double {
     val targetPx = minDimPx * 0.8
@@ -402,7 +315,7 @@ private fun DecimationChip(shown: Int, total: Int, modifier: Modifier = Modifier
             title = { Text("Showing $shown of $total aircrafts") },
             text = {
                 Text(
-                    "Above ${AircraftOverlay.MAX_DRAWN_MARKERS} markers the map draws an evenly " +
+                    "Above ${AircraftMapLayer.MAX_DRAWN_MARKERS} markers the map draws an evenly " +
                         "spaced subset so panning stays smooth. Every aircraft is still tracked and " +
                         "listed on the Live screen — only the drawing is reduced. Zoom in, or turn " +
                         "off ground traffic, to see individual markers again."

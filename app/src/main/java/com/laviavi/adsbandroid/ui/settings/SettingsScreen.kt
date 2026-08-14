@@ -26,7 +26,6 @@ import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.capture.GainOptions
 import com.laviavi.adsbandroid.capture.RtlTcpGain
 import com.laviavi.adsbandroid.location.ObserverMode
-import com.laviavi.adsbandroid.offline.ConfigurableTileDownloader
 import com.laviavi.adsbandroid.pipeline.AppConfig
 import com.laviavi.adsbandroid.pipeline.roundToGpsPrecision
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -144,7 +143,6 @@ private fun SettingsScreenContent(
                     ObserverSection(config, onConfigChange, onRequestLocationPermission, onUpdateGps)
                     PowerSection(config, onConfigChange)
                     OfflineMapsSection(onOpenOfflineMaps)
-                    OfflineTileSourceSection(config, onConfigChange)
                     DataSection(config, onConfigChange)
                     AboutSection()
                     ExitSection(onExit)
@@ -559,47 +557,6 @@ private fun ExitSection(onExit: () -> Unit) {
 }
 
 @Composable
-private fun OfflineTileSourceSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
-    SettingsSection(
-        "Offline map source",
-        "Where new areas are downloaded from. Importing areas you have already viewed " +
-            "on the map works without downloads enabled.",
-    ) {
-        SwitchRow(
-            label = "Enable offline map downloads",
-            description = "Download map areas ahead of time over unmetered Wi-Fi.",
-            checked = config.offlineDownloadEnabled,
-            onCheckedChange = { onChange(config.copy(offlineDownloadEnabled = it)) },
-        )
-        if (config.offlineDownloadEnabled) {
-            Spacer(Modifier.height(8.dp))
-            SettingsField(
-                value = config.offlineTileUrlTemplate,
-                label = "Tile URL template",
-                placeholder = "https://example.com/tiles/{z}/{x}/{y}.png",
-            ) { entered ->
-                if (ConfigurableTileDownloader.isValidTemplate(entered)) {
-                    onChange(config.copy(offlineTileUrlTemplate = entered.trim()))
-                }
-            }
-            if (config.offlineTileUrlTemplate.isNotBlank() &&
-                !ConfigurableTileDownloader.isValidTemplate(config.offlineTileUrlTemplate)
-            ) {
-                Text(
-                    "The address must contain {z}, {x} and {y}.",
-                    style = MaterialTheme.typography.labelSmall, color = AdsbColors.Error,
-                )
-            }
-            Text(
-                "Downloads run only over unmetered Wi-Fi. Check the terms of whichever map " +
-                    "service you use — many do not permit downloading areas in advance.",
-                style = MaterialTheme.typography.labelSmall, color = AdsbColors.TextSecondary,
-            )
-        }
-    }
-}
-
-@Composable
 private fun DataSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
     SettingsSection("Data") {
         SwitchRow(
@@ -624,7 +581,7 @@ private fun DataSection(config: AppConfig, onChange: (AppConfig) -> Unit) {
         SwitchRow(
             label = "Offline mode",
             description = "Stops all internet use. Enrichment is suspended and the map shows " +
-                "only already-cached tiles. Decoding is unaffected — the dongle needs no network.",
+                "only downloaded offline areas. Decoding is unaffected — the dongle needs no network.",
             checked = config.offlineMode,
             onCheckedChange = { onChange(config.copy(offlineMode = it)) },
         )

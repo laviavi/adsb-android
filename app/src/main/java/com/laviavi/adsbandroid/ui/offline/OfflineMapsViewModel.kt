@@ -2,62 +2,50 @@ package com.laviavi.adsbandroid.ui.offline
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.laviavi.adsbandroid.offline.*
+import com.laviavi.adsbandroid.offline.EligibilityResult
+import com.laviavi.adsbandroid.offline.LocationNamer
+import com.laviavi.adsbandroid.offline.MapLibreOfflineRepository
+import com.laviavi.adsbandroid.offline.NetworkEligibility
+import com.laviavi.adsbandroid.offline.NetworkState
+import com.laviavi.adsbandroid.offline.OfflineDownloadEvent
+import com.laviavi.adsbandroid.offline.OfflineDownloadPolicy
+import com.laviavi.adsbandroid.offline.SavedRegion
+import com.laviavi.adsbandroid.pipeline.AppConfigStore
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import org.maplibre.android.geometry.LatLngBounds
+import kotlin.math.cos
+import kotlin.math.max
 import javax.inject.Inject
 
-/**
- * Screen state for Offline Maps.
- *
- * Presentation only — every rule (Wi-Fi gating, append targeting, deletion safety)
- * lives in [OfflineMapManager], so this class can be replaced by a CLI without any
- * behaviour moving with it.
- */
 data class OfflineMapsUiState(
-    val segments: List<OfflineSegment> = emptyList(),
-    val usage: StorageUsage = StorageUsage(0, 0, 0L, 0),
+    val regions: List<SavedRegion> = emptyList(),
     val networkState: NetworkState = NetworkState.UNKNOWN,
-    val pendingSuggestions: List<TravelRecord> = emptyList(),
-    val resumable: List<Pair<OfflineSegment, CoverageEntry>> = emptyList(),
-
-    // Download flow
-    val selectedRadius: OfflineRadius? = null,
-    val selectedDetail: MapDetail = MapDetail.DEFAULT,
-    val estimate: DownloadEstimate? = null,
-    /** How much of the chosen radius is already in the map's own cache and can be adopted now. */
-    val importEstimate: DownloadEstimate? = null,
-    val downloadConfigured: Boolean = false,
-    val activeProgress: DownloadProgress? = null,
-
-    // Deletion flow
-    val selectedForDeletion: Set<String> = emptySet(),
-    val deletionPreview: DeletionPreview? = null,
-
+    val downloadProgress: OfflineDownloadEvent.Progress? = null,
     val message: String? = null,
 ) {
     val wifiReady: Boolean get() = OfflineDownloadPolicy.isDownloadAllowed(networkState)
-    /** The radius is chosen before a download can begin. */
-    val canStartDownload: Boolean
-        get() = selectedRadius != null && wifiReady && downloadConfigured && activeProgress == null
-    /** Import needs no network and no endpoint — only tiles the map has already cached. */
-    val canImport: Boolean
-        get() = selectedRadius != null && (importEstimate?.newTiles ?: 0) > 0 && activeProgress == null
-    val isDownloading: Boolean get() = activeProgress != null
+    val isDownloading: Boolean get() = downloadProgress != null
 }
 
+/**
+ * Offline maps, v2.0: a fixed-radius area download around a point via MapLibre's
+ * native `OfflineManager`, not the old raster-tile segment/manifest system (see
+ * `MapLibreOfflineRepository`'s doc comment for why that couldn't carry over —
+ * MapLibre's offline regions are opaque, not individually addressable files, so
+ * there's no equivalent to the old radius/detail byte estimate, cache import, or
+ * append-to-existing-region merge).
+ */
 @HiltViewModel
 class OfflineMapsViewModel @Inject constructor(
-    private val manager: OfflineMapManager,
+    private val repository: MapLibreOfflineRepository,
     private val eligibility: NetworkEligibility,
-    private val cacheSource: LocalTileSource,
-    private val configStore: com.laviavi.adsbandroid.pipeline.AppConfigStore,
+    private val namer: LocationNamer,
+    private val configStore: AppConfigStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OfflineMapsUiState())
@@ -67,180 +55,80 @@ class OfflineMapsViewModel @Inject constructor(
 
     init { refresh() }
 
-    /**
-     * All of this is file I/O — the manifest, every tile's on-disk size, and (for
-     * [OfflineMapManager.storageUsage]) a `File.length()` stat per stored tile key.
-     * That is cheap for a handful of segments but not for a large downloaded region,
-     * so it must never run on the caller's thread, including the very first call
-     * from [init].
-     */
     fun refresh() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val segments = manager.segments()
-            val usage = manager.storageUsage()
-            val networkState = eligibility.currentState()
-            val pendingSuggestions = manager.pendingTravelSuggestions()
-            val resumable = manager.resumableCoverage()
-            val configured = runCatching { configStore.load().offlineDownloadConfigured }.getOrDefault(false)
-            _uiState.value = _uiState.value.copy(
-                segments = segments,
-                usage = usage,
-                networkState = networkState,
-                pendingSuggestions = pendingSuggestions,
-                resumable = resumable,
-                downloadConfigured = configured,
-            )
-        }
-    }
-
-    // ── Download ──────────────────────────────────────────────────────────────
-
-    /** Radius must be picked before an estimate exists, and no download starts without one. */
-    fun selectRadius(radius: OfflineRadius, lat: Double, lon: Double) {
-        _uiState.value = _uiState.value.copy(selectedRadius = radius)
-        recomputeEstimates(lat, lon)
-    }
-
-    fun selectDetail(detail: MapDetail, lat: Double, lon: Double) {
-        _uiState.value = _uiState.value.copy(selectedDetail = detail)
-        recomputeEstimates(lat, lon)
-    }
-
-    /**
-     * Both estimates are computed off the main thread: the import figure enumerates
-     * every key in the map's tile cache, which is a disk-backed scan and can be tens
-     * of thousands of rows.
-     */
-    private fun recomputeEstimates(lat: Double, lon: Double) {
-        val radius = _uiState.value.selectedRadius ?: return
-        val detail = _uiState.value.selectedDetail
         viewModelScope.launch {
-            val download = manager.estimateForRadius(lat, lon, radius, detail)
-            val import = withContext(Dispatchers.IO) {
-                manager.estimateImport(lat, lon, radius, cacheSource, detail)
-            }
-            _uiState.value = _uiState.value.copy(estimate = download, importEstimate = import)
+            val regions = repository.list()
+            _uiState.value = _uiState.value.copy(regions = regions, networkState = eligibility.currentState())
         }
     }
 
-    fun clearRadius() {
-        _uiState.value = _uiState.value.copy(selectedRadius = null, estimate = null, importEstimate = null)
-    }
-
-    /**
-     * Adopts already-cached coverage. No network, no endpoint, no Wi-Fi requirement —
-     * the bytes are already on the device.
-     */
-    fun importFromCache(lat: Double, lon: Double, explicitName: String? = null) {
-        val radius = _uiState.value.selectedRadius ?: return
-        downloadJob = viewModelScope.launch {
-            val outcome = withContext(Dispatchers.IO) {
-                manager.importFromCache(
-                    lat = lat, lon = lon, radius = radius, source = cacheSource,
-                    detail = _uiState.value.selectedDetail, explicitName = explicitName,
-                    onProgress = { p -> _uiState.value = _uiState.value.copy(activeProgress = p) },
-                )
-            }
-            finish(outcome)
-        }
-    }
-
-    fun startDownload(lat: Double, lon: Double, explicitName: String? = null) {
-        val radius = _uiState.value.selectedRadius ?: run {
-            _uiState.value = _uiState.value.copy(message = "Choose a radius first.")
+    /** Downloads a fixed-radius area around [lat]/[lon] using the currently selected base map style. */
+    fun download(lat: Double, lon: Double) {
+        val result = eligibility.check()
+        if (result is EligibilityResult.Ineligible) {
+            _uiState.value = _uiState.value.copy(message = result.reason)
             return
         }
         downloadJob = viewModelScope.launch {
-            val outcome = manager.downloadNew(
-                lat = lat, lon = lon, radius = radius, detail = _uiState.value.selectedDetail,
-                explicitName = explicitName,
-                onProgress = { p -> _uiState.value = _uiState.value.copy(activeProgress = p) },
-            )
-            finish(outcome)
+            val styleUrl = runCatching { configStore.load().mapBaseMap.styleUrl }.getOrDefault(DEFAULT_STYLE_URL)
+            val name = namer.nameFor(lat, lon) ?: "Offline area"
+            val bounds = boundsAround(lat, lon, RADIUS_NM)
+            repository.download(styleUrl, bounds, MIN_ZOOM, MAX_ZOOM, 1f, name).collect { event ->
+                when (event) {
+                    is OfflineDownloadEvent.Progress ->
+                        _uiState.value = _uiState.value.copy(downloadProgress = event)
+                    is OfflineDownloadEvent.Completed -> {
+                        _uiState.value = _uiState.value.copy(
+                            downloadProgress = null,
+                            message = "Download complete — ${formatBytes(event.bytes)}.",
+                        )
+                        refresh()
+                    }
+                    is OfflineDownloadEvent.Failed -> {
+                        _uiState.value = _uiState.value.copy(downloadProgress = null, message = event.reason)
+                    }
+                }
+            }
         }
     }
 
-    fun resume(segmentId: String, coverageId: String) {
-        downloadJob = viewModelScope.launch {
-            finish(
-                manager.resume(segmentId, coverageId) { p ->
-                    _uiState.value = _uiState.value.copy(activeProgress = p)
-                },
-            )
-        }
-    }
-
-    /** Cancelling keeps everything downloaded so far — the manager marks it resumable. */
+    /** Progress already downloaded is kept — MapLibre only discards a region on explicit delete. */
     fun cancelDownload() {
         downloadJob?.cancel()
         downloadJob = null
-        _uiState.value = _uiState.value.copy(activeProgress = null, message = "Download stopped. Progress kept.")
+        _uiState.value = _uiState.value.copy(downloadProgress = null, message = "Download stopped. Progress kept.")
         refresh()
     }
 
-    // ── Append ────────────────────────────────────────────────────────────────
-
-    fun appendTarget(recordId: String): AppendTarget? = manager.chooseAppendTarget(recordId, _uiState.value.selectedDetail)
-
-    fun appendCoverage(recordId: String, segmentId: String) {
-        downloadJob = viewModelScope.launch {
-            finish(
-                manager.appendTravelCoverage(recordId, segmentId, _uiState.value.selectedDetail) { p ->
-                    _uiState.value = _uiState.value.copy(activeProgress = p)
-                },
-            )
+    fun delete(id: Long) {
+        viewModelScope.launch {
+            repository.deleteById(id)
+            refresh()
         }
     }
 
-    fun deferSuggestion(recordId: String) { manager.deferTravelSuggestion(recordId); refresh() }
-    fun dismissSuggestion(recordId: String) { manager.dismissTravelSuggestion(recordId); refresh() }
-
-    // ── Deletion ──────────────────────────────────────────────────────────────
-
-    fun toggleForDeletion(segmentId: String) {
-        val current = _uiState.value.selectedForDeletion
-        _uiState.value = _uiState.value.copy(
-            selectedForDeletion = if (segmentId in current) current - segmentId else current + segmentId,
-            deletionPreview = null,
-        )
+    fun clearMessage() {
+        _uiState.value = _uiState.value.copy(message = null)
     }
 
-    fun clearDeletionSelection() {
-        _uiState.value = _uiState.value.copy(selectedForDeletion = emptySet(), deletionPreview = null)
-    }
+    companion object {
+        const val RADIUS_NM = 50.0
+        const val MIN_ZOOM = 4.0
+        const val MAX_ZOOM = 12.0
+        private const val DEFAULT_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
-    /** Builds the confirmation detail. Nothing is removed until [confirmDeletion]. */
-    fun prepareDeletion() {
-        val ids = _uiState.value.selectedForDeletion
-        if (ids.isEmpty()) return
-        _uiState.value = _uiState.value.copy(deletionPreview = manager.deletionPreview(ids))
-    }
-
-    fun confirmDeletion() {
-        val ids = _uiState.value.selectedForDeletion
-        if (ids.isEmpty()) return
-        val result = manager.deleteSegments(ids)
-        _uiState.value = _uiState.value.copy(
-            selectedForDeletion = emptySet(),
-            deletionPreview = null,
-            message = "Removed ${result.segmentsRemoved} map(s), freeing ${TileGeometry.formatBytes(result.bytesFreed)}.",
-        )
-        refresh()
-    }
-
-    fun clearMessage() { _uiState.value = _uiState.value.copy(message = null) }
-
-    private fun finish(outcome: DownloadOutcome) {
-        val text = when (outcome) {
-            is DownloadOutcome.Completed ->
-                "Download complete — ${outcome.tilesStored} areas, ${TileGeometry.formatBytes(outcome.bytes)}."
-            is DownloadOutcome.Paused ->
-                "${outcome.reason} ${outcome.stored} of ${outcome.total} saved — resume when back on Wi-Fi."
-            is DownloadOutcome.Rejected -> outcome.reason
-            is DownloadOutcome.Failed -> outcome.reason
-            is DownloadOutcome.NothingToDo -> "Already downloaded — nothing new to fetch."
+        /** A generous rectangular bound around a point — MapLibre's region download doesn't need geodesic precision. */
+        fun boundsAround(lat: Double, lon: Double, radiusNm: Double): LatLngBounds {
+            val latDelta = radiusNm / 60.0
+            val lonDelta = radiusNm / (60.0 * max(cos(Math.toRadians(lat)), 0.1))
+            return LatLngBounds.from(lat + latDelta, lon + lonDelta, lat - latDelta, lon - lonDelta)
         }
-        _uiState.value = _uiState.value.copy(activeProgress = null, message = text)
-        refresh()
+
+        fun formatBytes(bytes: Long): String = when {
+            bytes >= 1_000_000_000 -> "%.1f GB".format(bytes / 1_000_000_000.0)
+            bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
+            bytes >= 1_000 -> "%.0f KB".format(bytes / 1_000.0)
+            else -> "$bytes B"
+        }
     }
 }
