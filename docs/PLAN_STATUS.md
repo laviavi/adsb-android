@@ -2773,3 +2773,18 @@ added to `dist/`. Needs to run on-device through at least one full
 aircraft-departure cycle, then `history_debug_<date>.csv` pulled and
 reviewed to actually diagnose the issue — nothing to verify from this
 sandbox.
+
+**Follow-up (2026-08-15, v2.0.8):** Avi couldn't retrieve the file —
+Android blocks file managers from browsing `Android/data/<pkg>/files`
+since API 30, "show hidden files" doesn't override it, and no computer
+with adb was on hand. Added a "Share debug" button next to History's
+existing "Share log" (`HistoryScreen.kt`, `PipelineService
+.exportHistoryDebugCsv()`, threaded through `TrafficScreen.kt`/
+`MainActivity.kt` the same way as the other two share buttons) so the app
+hands `history_debug_<date>.csv` to the OS share sheet directly, same as
+every other export in this app. Every new line tagged `// TEMP DEBUG:
+history investigation` alongside the rest of §52's instrumentation for the
+same easy removal once the underlying cause is found.
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, `:app:assembleDebug`
+passes. Version bumped to v2.0.8 (`versionCode` 40), debug APK built and
+added to `dist/`.

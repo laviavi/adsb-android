@@ -122,6 +122,12 @@ class MainActivity : ComponentActivity() {
                             if (file != null) shareCsv(this@MainActivity, file, "Share enrichment log")
                         }
                     },
+                    // TEMP DEBUG: history investigation — delete with the rest.
+                    onShareHistoryDebug = {
+                        pipelineService?.exportHistoryDebugCsv { file ->
+                            if (file != null) shareCsv(this@MainActivity, file, "Share history debug log")
+                        }
+                    },
                     onResetCounters = { pipelineService?.resetStatsCounters() },
                     onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
                     onRetryEnrichment = { icao -> pipelineService?.retryEnrichment(icao) },
@@ -179,6 +185,7 @@ private fun AdsbScaffold(
     onClearHistory: () -> Unit,
     onShareHistory: () -> Unit,
     onShareEventLog: () -> Unit,
+    onShareHistoryDebug: () -> Unit, // TEMP DEBUG: history investigation — delete with the rest
     onResetCounters: () -> Unit,
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
     onRetryEnrichment: (String) -> Unit,
@@ -300,6 +307,7 @@ private fun AdsbScaffold(
                         onClearHistory = onClearHistory,
                         onShareHistory = onShareHistory,
                         onShareEventLog = onShareEventLog,
+                        onShareHistoryDebug = onShareHistoryDebug,
                         onExit = onExit,
                     )
                 }

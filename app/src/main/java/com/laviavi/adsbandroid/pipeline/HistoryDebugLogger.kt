@@ -65,4 +65,8 @@ class HistoryDebugLogger(private val context: Context) {
 
     @Synchronized
     fun close() { writer?.close(); writer = null }
+
+    /** Today's debug file, for the share action — Android's scoped storage blocks browsing
+     *  Android/data/<pkg>/files via a file manager, so the app has to hand it over directly. */
+    fun currentFile(): File = File(context.getExternalFilesDir(null), "history_debug_${dayFmt.format(Date())}.csv")
 }

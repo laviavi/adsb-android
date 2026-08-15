@@ -41,6 +41,7 @@ fun HistoryScreen(
     onClear: () -> Unit,
     onShare: () -> Unit,
     onShareEventLog: () -> Unit,
+    onShareHistoryDebug: () -> Unit, // TEMP DEBUG: history investigation — delete with the rest
     modifier: Modifier = Modifier,
 ) {
     var filter by remember { mutableStateOf("") }
@@ -94,6 +95,8 @@ fun HistoryScreen(
             // screen's own data) — always offered, not gated on `entries` being non-empty,
             // since it's the only way to retrieve a departed aircraft's enrichment log.
             TextButton(onClick = onShareEventLog) { Text("Share log", color = AdsbColors.Primary) }
+            // TEMP DEBUG: history investigation — delete this button with the rest.
+            TextButton(onClick = onShareHistoryDebug) { Text("Share debug", color = AdsbColors.Primary) }
             if (entries.isNotEmpty()) {
                 TextButton(onClick = onShare) { Text("Share", color = AdsbColors.Primary) }
                 TextButton(onClick = onClear) { Text("Clear", color = AdsbColors.Primary) }

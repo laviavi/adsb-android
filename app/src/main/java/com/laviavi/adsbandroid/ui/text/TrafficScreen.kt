@@ -49,6 +49,7 @@ fun TrafficScreen(
     onClearHistory: () -> Unit,
     onShareHistory: () -> Unit,
     onShareEventLog: () -> Unit,
+    onShareHistoryDebug: () -> Unit, // TEMP DEBUG: history investigation — delete with the rest
     onExit: () -> Unit,
 ) {
     val history by viewModel.history.collectAsStateWithLifecycle()
@@ -101,6 +102,7 @@ fun TrafficScreen(
                 )
                 TrafficTab.HISTORY -> HistoryScreen(
                     entries = history, onClear = onClearHistory, onShare = onShareHistory, onShareEventLog = onShareEventLog,
+                    onShareHistoryDebug = onShareHistoryDebug,
                 )
                 TrafficTab.STATS -> StatsScreen(visits = visits)
             }

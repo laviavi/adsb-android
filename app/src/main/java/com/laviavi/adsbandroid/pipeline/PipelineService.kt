@@ -198,6 +198,16 @@ class PipelineService : Service() {
         stats.reset()
     }
 
+    // TEMP DEBUG: history investigation — delete this method with the rest.
+    /** Today's history_debug_*.csv, for the share action — Android's scoped storage means
+     *  a file manager can't browse to it, so this is the only practical way to get it off the phone. */
+    fun exportHistoryDebugCsv(onResult: (java.io.File?) -> Unit = {}) {
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val file = historyDebugLogger.currentFile().takeIf { it.exists() }
+            onResult(file)
+        }
+    }
+
     private val _sourceState = MutableStateFlow<SourceState>(SourceState.Idle)
     val sourceState: StateFlow<SourceState> = _sourceState.asStateFlow()
 
