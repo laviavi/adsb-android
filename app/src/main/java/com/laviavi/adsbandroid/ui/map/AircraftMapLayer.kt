@@ -391,7 +391,7 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         private const val CLUSTER_RADIUS_PX = 60
 
         /** Great-circle destination points around a center — renders a range ring as an actual geodesic circle (real nm at any zoom), not a MapLibre CircleLayer (screen-pixel radius, not geo-accurate). Returns (lat, lon) pairs. */
-        fun circlePoints(centerLat: Double, centerLon: Double, radiusNm: Double, points: Int = 72): List<Pair<Double, Double>> {
+        fun circlePoints(centerLat: Double, centerLon: Double, radiusNm: Double, points: Int = 144): List<Pair<Double, Double>> {
             val earthRadiusNm = 3440.065
             val angular = radiusNm / earthRadiusNm
             val lat1 = Math.toRadians(centerLat)

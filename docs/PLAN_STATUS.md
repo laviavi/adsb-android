@@ -2643,3 +2643,18 @@ passes. Version bumped to v2.0.5 (`versionCode` 37), debug APK built and
 added to `dist/`. Not verified on-device — Avi should confirm the "Share
 log" button in History produces a CSV with rows for aircraft no longer
 live.
+
+**Also folded into v2.0.5 (same version, follow-up commit):** range-ring
+segment count doubled, 72 → 144 (`AircraftMapLayer.kt`'s `circlePoints()`
+default) — visibly faceted at close zoom before, per Avi. Capped at 144
+rather than the discussed 180 ceiling since 2× the prior value already
+lands under it. Kept as the existing geodesic-polygon approach (not
+MapLibre's `CircleLayer`) — a true GPU circle was discussed as the
+zero-faceting alternative (pixel radius from a zoom-exponential
+expression) but is a larger restructuring (rings move from line features
+to point features, label placement logic changes) for a difference that
+likely isn't visible at this radii/zoom range once faceted at 144 points
+instead of 72. Revisit only if faceting is still visible on-device at max
+zoom. `dist/adsb-android-v2.0.5.apk` rebuilt in place — `versionCode`/
+`versionName` deliberately left at 37/2.0.5 per Avi's instruction rather
+than bumped to a new version.
