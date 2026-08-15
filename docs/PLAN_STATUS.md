@@ -2788,3 +2788,41 @@ same easy removal once the underlying cause is found.
 `:core:receiver:test` + `:app:testDebugUnitTest` pass, `:app:assembleDebug`
 passes. Version bumped to v2.0.8 (`versionCode` 40), debug APK built and
 added to `dist/`.
+
+## 53. Meta-enrichment failures were logging "no data" with the real cause thrown away (2026-08-15, v2.0.9)
+
+Avi found a concrete case in a real exported enrichment log: ICAO C04205
+(Sikorsky S-76A, Helijet International — verified live against both
+hexdb.io and adsbdb, both returning complete, correctly-shaped data) had
+two independent **fresh** (not cached) `hexdb`/`adsbdb-aircraft` attempts,
+over 4 hours apart, both logged as plain "no data." Two fresh failures
+that far apart rules out both "aircraft genuinely has no data" (it does,
+confirmed live) and "stale cache" (both were real network attempts, well
+past the 2h TTL). The actual cause was invisible: `fetchHexdb`/
+`fetchOpenSky`/`fetchAdsbdb` caught their exception, sent it to `Log.d`
+(logcat only, gone once the app isn't attached to a debugger), and
+recorded only `"no data"` in the *persisted* audit log — indistinguishable
+from a genuinely empty response. `RouteEnrichment` already captured its
+real error message on failure (`"error: <message>"`); these three never
+did.
+
+Fixed by changing `logAttempt()` to take the fetch's `Result<AircraftMeta?>`
+instead of just the mapped value, so a failure now records
+`"error: <ExceptionClass>: <message>"` in `resultSummary` instead of
+being collapsed into the same "no data" a real empty response produces.
+Split the cache-hit path into its own `logCacheHit()` (no `Result` to
+report there, since nothing was fetched) to keep the two cases distinct.
+This doesn't fix whatever is actually failing for C04205-like cases — it
+makes the *next* occurrence diagnosable from the exported log instead of
+requiring logcat access this sandbox and Avi's phone don't have a
+convenient path to.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass (existing
+`AircraftMetaEnrichmentTests`/`HexdbFieldMappingTests`/
+`AdsbdbFieldMappingTests`/`MergeSourcesTests` untouched — only the pure
+mapping functions they cover were reused, not changed), `:app:assembleDebug`
+passes. Version bumped to v2.0.9 (`versionCode` 41), debug APK built and
+added to `dist/`. Not verified on-device. Next real repro of a meta-source
+"no data" row should now show the actual exception — worth pulling the
+enrichment log again after this is installed to see if C04205 (or a
+similar case) recurs with a real error message this time.

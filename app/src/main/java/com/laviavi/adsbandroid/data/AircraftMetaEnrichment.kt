@@ -173,7 +173,7 @@ class AircraftMetaEnrichment(
             else AircraftMeta(key, cached.registration.present(), cached.manufacturer.present(),
                 cached.model.present(), cached.typeCode.present(), cached.owner.present(), cached.source)
             if (loggedCacheHitAt.put(key, cached.cachedAtMs) != cached.cachedAtMs) {
-                logAttempt(key, source = null, servedFromCache = true, requestUrl = null, meta = result, durationMs = 0)
+                logCacheHit(key, result)
             }
             return result
         }
@@ -217,23 +217,21 @@ class AircraftMetaEnrichment(
     private suspend fun fetchHexdb(icao: String): AircraftMeta? {
         val url = "https://hexdb.io/api/v1/aircraft/${icao.lowercase()}"
         val startedAt = System.currentTimeMillis()
-        val meta = runCatching {
+        val outcome = runCatching {
             val resp: HexdbResponse = client.get(url) {
                 headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
             }.body()
             mapHexdbResponse(icao, resp)
-        }.getOrElse {
-            Log.d(TAG, "hexdb.io error for $icao: $it")
-            null
         }
-        logAttempt(icao, "hexdb", false, url, meta, System.currentTimeMillis() - startedAt)
-        return meta
+        outcome.exceptionOrNull()?.let { Log.d(TAG, "hexdb.io error for $icao: $it") }
+        logAttempt(icao, "hexdb", false, url, outcome, System.currentTimeMillis() - startedAt)
+        return outcome.getOrNull()
     }
 
     private suspend fun fetchOpenSky(icao: String): AircraftMeta? {
         val url = "https://opensky-network.org/api/metadata/aircraft/icao/${icao.lowercase()}"
         val startedAt = System.currentTimeMillis()
-        val meta = runCatching {
+        val outcome = runCatching {
             val resp: OpenSkyResponse = client.get(url) {
                 headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
             }.body()
@@ -243,39 +241,60 @@ class AircraftMetaEnrichment(
             val tc   = resp.typecode.present()?.uppercase()
             if (reg == null && mfr == null && mdl == null) return@runCatching null
             AircraftMeta(icao, reg, mfr, mdl, tc, null, "opensky")
-        }.getOrElse {
-            Log.d(TAG, "OpenSky error for $icao: $it")
-            null
         }
-        logAttempt(icao, "opensky", false, url, meta, System.currentTimeMillis() - startedAt)
-        return meta
+        outcome.exceptionOrNull()?.let { Log.d(TAG, "OpenSky error for $icao: $it") }
+        logAttempt(icao, "opensky", false, url, outcome, System.currentTimeMillis() - startedAt)
+        return outcome.getOrNull()
     }
 
     private suspend fun fetchAdsbdb(icao: String): AircraftMeta? {
         val url = "https://api.adsbdb.com/v0/aircraft/${icao.lowercase()}"
         val startedAt = System.currentTimeMillis()
-        val meta = runCatching {
+        val outcome = runCatching {
             val resp: AdsbdbAircraftResponse = client.get(url) {
                 headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
             }.body()
             resp.response?.aircraft?.let { mapAdsbdbFields(icao, it) }
-        }.getOrElse {
-            Log.d(TAG, "adsbdb error for $icao: $it")
-            null
         }
-        logAttempt(icao, "adsbdb-aircraft", false, url, meta, System.currentTimeMillis() - startedAt)
-        return meta
+        outcome.exceptionOrNull()?.let { Log.d(TAG, "adsbdb error for $icao: $it") }
+        logAttempt(icao, "adsbdb-aircraft", false, url, outcome, System.currentTimeMillis() - startedAt)
+        return outcome.getOrNull()
     }
 
+    /** [outcome]'s exception (if any) is what previously vanished into logcat only — now
+     *  captured in the persisted resultSummary so a real failure reads as "error: ..." instead
+     *  of an indistinguishable "no data". Confirmed live: hexdb.io/adsbdb both had complete
+     *  data for an ICAO (C04205) that this audit log recorded as two separate genuine "no
+     *  data" fetches 4+ hours apart — a real fetch failure, not missing data or a stale cache,
+     *  that the old logging had no way to explain. */
     private suspend fun logAttempt(
-        icao: String, source: String?, servedFromCache: Boolean, requestUrl: String?, meta: AircraftMeta?, durationMs: Long,
+        icao: String, source: String?, servedFromCache: Boolean, requestUrl: String?,
+        outcome: Result<AircraftMeta?>, durationMs: Long,
     ) {
+        val meta = outcome.getOrNull()
+        val summary = outcome.fold(
+            onSuccess = { it.summarize() },
+            onFailure = { "error: ${it.javaClass.simpleName}: ${it.message}" },
+        )
         runCatching {
             eventLogDao.insert(
                 AircraftEventLogEntity(
                     icao = icao, timestampMs = System.currentTimeMillis(), eventType = "ENRICHMENT_ATTEMPT",
                     source = source, requestKey = icao, requestUrl = requestUrl, servedFromCache = servedFromCache,
-                    success = meta != null, resultSummary = meta.summarize(), durationMs = durationMs,
+                    success = meta != null, resultSummary = summary, durationMs = durationMs,
+                )
+            )
+        }
+    }
+
+    /** Cache-hit path never fetched anything, so there's no [Result] to report — always a plain summary. */
+    private suspend fun logCacheHit(icao: String, meta: AircraftMeta?) {
+        runCatching {
+            eventLogDao.insert(
+                AircraftEventLogEntity(
+                    icao = icao, timestampMs = System.currentTimeMillis(), eventType = "ENRICHMENT_ATTEMPT",
+                    source = null, requestKey = icao, requestUrl = null, servedFromCache = true,
+                    success = meta != null, resultSummary = meta.summarize(), durationMs = 0,
                 )
             )
         }
