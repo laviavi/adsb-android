@@ -2728,3 +2728,48 @@ added to `dist/`. Not verified on-device — Avi should confirm route
 lookups now actually succeed for a recognized callsign, and that the
 enrichment log for a long-lived aircraft stays small instead of growing
 every second.
+
+## 52. TEMPORARY debug aid: live-aircraft-missing-from-History investigation (2026-08-15, v2.0.7)
+
+Avi saw live aircraft today that never landed in the History list. Two
+competing hypotheses from reading the code (no reproduction possible
+without the device): (a) the background expiry loop that feeds History
+dies silently at some point and never runs again — nothing else visibly
+breaks since it's an isolated coroutine under a `SupervisorJob` — or (b)
+the loop is fine but `recordDeparted()`'s actual DB write fails for
+specific aircraft and is silently swallowed by its existing `runCatching`.
+
+**This is temporary instrumentation, not a fix** — every piece is tagged
+`// TEMP DEBUG: history investigation` for easy removal once the cause is
+confirmed:
+- New file `HistoryDebugLogger.kt` — day-rotating CSV, same pattern as the
+  existing `PerformanceCsvLogger`/`CoverageCsvLogger`. Writes to
+  `history_debug_<date>.csv` under the app's external files dir (same
+  place `performance_*.csv`/`coverage_*.csv` already land — pull via `adb`
+  or a file manager, no export UI added for a temporary aid).
+- A new 30s watchdog coroutine in `PipelineService.onCreate()`: snapshots
+  the live aircraft list each tick, flags any aircraft still live well past
+  its own configured expiry window (`STALE_STILL_LIVE` → proves hypothesis
+  a) and any aircraft that vanished from live but still isn't in
+  `aircraft_seen` after ~60-90s grace (`VANISHED_NOT_IN_HISTORY` → points
+  at hypothesis b or a stalled loop, depending on whether a matching
+  `WRITE_FAIL` row exists for it).
+- `recordDeparted()`'s 3 existing `runCatching` blocks (event log,
+  `aircraft_seen`, `aircraft_visits`) now each log their outcome
+  (`WRITE_OK`/`WRITE_FAIL` + exception detail) — this DAO call was
+  previously swallowing failures with zero visibility at all.
+
+Deliberately kept out of `:core:receiver` — `ReceiverRepository`'s expiry
+loop itself is untouched; the watchdog observes it externally from `:app`
+(the layer that already has `Context`/file I/O) rather than adding
+Android-only debug plumbing to the pure, unit-tested module. Removal is:
+delete `HistoryDebugLogger.kt`, delete the watchdog `launch` block and the
+`historyDebugLogger` field/close() call in `PipelineService.kt`, and revert
+the `recordDeparted()` `logWriteOutcome` calls back to plain `runCatching`.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, `:app:assembleDebug`
+passes. Version bumped to v2.0.7 (`versionCode` 39), debug APK built and
+added to `dist/`. Needs to run on-device through at least one full
+aircraft-departure cycle, then `history_debug_<date>.csv` pulled and
+reviewed to actually diagnose the issue — nothing to verify from this
+sandbox.

@@ -104,6 +104,10 @@ class PipelineService : Service() {
     private val rawLogger by lazy { RawMessageLogger(applicationContext) }
     private val performanceCsvLogger by lazy { PerformanceCsvLogger(applicationContext) }
     private val coverageCsvLogger by lazy { CoverageCsvLogger(applicationContext) }
+    // TEMP DEBUG: history investigation — delete this field, the watchdog loop below,
+    // the close() call in releaseResources(), and the logWriteOutcome() calls inside
+    // recordDeparted() once the "live aircraft missing from History" cause is found.
+    private val historyDebugLogger by lazy { HistoryDebugLogger(applicationContext) }
     private val routeEnrichment by lazy { RouteEnrichment(enrichmentDao, eventLogDao) }
     private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao, eventLogDao) }
     private val flightAwareEnrichment by lazy { FlightAwareEnrichment(serviceScope, eventLogDao) }
@@ -363,6 +367,46 @@ class PipelineService : Service() {
                 runCatching { eventLogDao.purgeOlderThan(cutoff) }
             }
         }
+        // TEMP DEBUG: history investigation — delete this whole launch block once the
+        // "live aircraft missing from History" cause is found (see historyDebugLogger).
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var previousLiveIcaos: Set<String> = emptySet()
+            val pendingVanished = HashMap<String, Int>() // icao -> ticks since it left the live list
+            while (true) {
+                kotlinx.coroutines.delay(30_000L)
+                runCatching {
+                    val expirySeconds = currentConfig.aircraftExpirySeconds
+                    val now = System.currentTimeMillis()
+                    val live = receiverRepository.aircraft.value
+                    val liveIcaos = live.map { it.icao }.toSet()
+
+                    // Should have been evicted by the expiry loop already, going by its
+                    // own configured window (+15s grace for that loop's own tick cadence).
+                    // If this is ever non-empty, the expiry loop has stopped running.
+                    val staleStillLive = live
+                        .filter { now - it.lastSeenMs > expirySeconds * 1000L + 15_000L }
+                        .map { it.icao }
+
+                    val newlyVanished = previousLiveIcaos - liveIcaos
+                    newlyVanished.forEach { pendingVanished.putIfAbsent(it, 0) }
+
+                    val historyIcaos = runCatching { seenDao.getAllOnce().map { it.icao }.toSet() }.getOrDefault(emptySet())
+                    val stillMissing = mutableListOf<String>()
+                    val iter = pendingVanished.entries.iterator()
+                    while (iter.hasNext()) {
+                        val (icao, ticks) = iter.next()
+                        when {
+                            icao in historyIcaos || icao in liveIcaos -> iter.remove()
+                            ticks >= 2 -> { stillMissing.add(icao); iter.remove() } // ~60-90s grace for the async write
+                            else -> pendingVanished[icao] = ticks + 1
+                        }
+                    }
+
+                    historyDebugLogger.logTick(live.size, expirySeconds, staleStillLive, stillMissing)
+                    previousLiveIcaos = liveIcaos
+                }
+            }
+        }
         // Load the last selected source/config before starting - without this, every
         // restart silently reverts to the hardcoded NETWORK default (the original bug).
         serviceScope.launch {
@@ -537,6 +581,7 @@ class PipelineService : Service() {
                 rawLogger.close()
                 performanceCsvLogger.close()
                 coverageCsvLogger.close()
+                historyDebugLogger.close() // TEMP DEBUG: history investigation — delete with the rest
                 runCatching { routeEnrichment.close() }
                 runCatching { aircraftMetaEnrichment.close() }
                 runCatching { flightAwareEnrichment.close() }
@@ -831,7 +876,7 @@ class PipelineService : Service() {
         serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             departed.forEach { s ->
                 val movedAtMs = System.currentTimeMillis()
-                runCatching {
+                val eventLogResult = runCatching {
                     eventLogDao.insert(
                         com.laviavi.adsbandroid.data.AircraftEventLogEntity(
                             icao = s.icao, timestampMs = movedAtMs, eventType = "MOVED_TO_HISTORY",
@@ -840,7 +885,10 @@ class PipelineService : Service() {
                         )
                     )
                 }
-                runCatching {
+                // TEMP DEBUG: history investigation — delete these logWriteOutcome() calls
+                // (and the eventLogResult/seenResult/visitResult val captures) once resolved.
+                historyDebugLogger.logWriteOutcome(s.icao, "eventLog", eventLogResult.isSuccess, eventLogResult.exceptionOrNull()?.toString())
+                val seenResult = runCatching {
                     seenDao.upsert(AircraftSeenEntity(
                         icao          = s.icao,
                         callsign      = s.callsign?.trim()?.takeIf { it.isNotEmpty() },
@@ -860,11 +908,12 @@ class PipelineService : Service() {
                         lastSeenMs    = s.lastSeenMs,
                     ))
                 }
+                historyDebugLogger.logWriteOutcome(s.icao, "aircraft_seen", seenResult.isSuccess, seenResult.exceptionOrNull()?.toString())
                 // Independent of aircraft_seen above: one row per departure, never
                 // replaced, so it survives History's Clear and builds a "times seen"
                 // log the Stats screen reads from.
                 val isFirstTime = runCatching { visitDao.countByIcao(s.icao) == 0 }.getOrDefault(false)
-                runCatching {
+                val visitResult = runCatching {
                     visitDao.insert(AircraftVisitEntity(
                         icao          = s.icao,
                         registration  = s.registration,
@@ -876,6 +925,7 @@ class PipelineService : Service() {
                         messageCount  = s.messageCount,
                     ))
                 }
+                historyDebugLogger.logWriteOutcome(s.icao, "aircraft_visits", visitResult.isSuccess, visitResult.exceptionOrNull()?.toString())
                 if (isFirstTime) {
                     val label = s.callsign?.trim()?.takeIf { it.isNotEmpty() } ?: s.icao
                     postMilestoneNotification("New aircraft spotted", "$label — first time seen")
