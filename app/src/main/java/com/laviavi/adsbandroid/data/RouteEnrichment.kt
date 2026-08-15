@@ -1,22 +1,34 @@
 package com.laviavi.adsbandroid.data
 
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
-import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import io.ktor.client.request.headers
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
-@Serializable
-private data class AdsbdbCallsignResponse(val response: AdsbdbResponseBody? = null)
-@Serializable
-private data class AdsbdbResponseBody(val flightroute: AdsbdbFlightRoute? = null)
-@Serializable
-private data class AdsbdbFlightRoute(val origin: AdsbdbAirport? = null, val destination: AdsbdbAirport? = null)
-@Serializable
-private data class AdsbdbAirport(@SerialName("icao_code") val icaoCode: String? = null)
+private val routeJson = Json { ignoreUnknownKeys = true }
+
+/**
+ * adsbdb's "response" field is an OBJECT (`{"flightroute": {...}}`) for a callsign it
+ * recognizes, but a plain STRING (e.g. "unknown callsign", "invalid callsign: X") for one
+ * it doesn't — confirmed live (curl) against real unrecognized callsigns. Decoding that
+ * field with a fixed object-shaped @Serializable class threw "Serializer for class X is
+ * not found" on every miss, which is most callsigns — every real route fetch was failing
+ * silently and getting cached as a negative result. Parsed as raw JsonElement instead, so
+ * a string "response" is just treated as "no route" rather than a decode error.
+ */
+internal fun parseAdsbdbRoute(json: String): String? {
+    val root = runCatching { routeJson.parseToJsonElement(json).jsonObject }.getOrNull() ?: return null
+    val fr = (root["response"] as? JsonObject)?.get("flightroute") as? JsonObject ?: return null
+    val origin = (fr["origin"] as? JsonObject)?.get("icao_code")?.jsonPrimitive?.content.present()
+    val dest = (fr["destination"] as? JsonObject)?.get("icao_code")?.jsonPrimitive?.content.present()
+    return if (origin != null && dest != null) "$origin-$dest" else null
+}
 
 /**
  * Route lookup via adsbdb.com's free public API (no key required) — a hobbyist-friendly
@@ -29,8 +41,14 @@ class RouteEnrichment(
 ) {
 
     private val client = HttpClient(CIO) {
-        install(ContentNegotiation) { json() }
+        engine { requestTimeout = 8_000 }
     }
+
+    /** icao+source -> cachedAtMs already logged, so a live aircraft's repeated cache hits (once
+     *  per position update, several times a second) log once per distinct cached value instead
+     *  of flooding the event log — confirmed via a real export: 99% of logged rows were
+     *  re-logged cache checks, not real attempts. */
+    private val loggedCacheHitAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** [icao] is only for the audit log below — the actual lookup is keyed by [callsign], adsbdb has no hex-based route endpoint. */
     suspend fun lookupRoute(icao: String, callsign: String): String? {
@@ -40,21 +58,22 @@ class RouteEnrichment(
 
         val cached = cacheDao.get(key)
         if (cached != null && now - cached.cachedAtMs < CACHE_TTL_MS) {
-            logAttempt(
-                icao = icao, servedFromCache = true, requestKey = key, requestUrl = null,
-                success = cached.route != null, result = cached.route ?: "no data (cached)", durationMs = 0,
-            )
+            if (loggedCacheHitAt.put(key, cached.cachedAtMs) != cached.cachedAtMs) {
+                logAttempt(
+                    icao = icao, servedFromCache = true, requestKey = key, requestUrl = null,
+                    success = cached.route != null, result = cached.route ?: "no data (cached)", durationMs = 0,
+                )
+            }
             return cached.route
         }
 
         val url = "https://api.adsbdb.com/v0/callsign/$key"
         val startedAt = System.currentTimeMillis()
         val outcome = runCatching {
-            val resp: AdsbdbCallsignResponse = client.get(url).body()
-            val fr = resp.response?.flightroute ?: return@runCatching null
-            val origin = fr.origin?.icaoCode.present()
-            val dest = fr.destination?.icaoCode.present()
-            if (origin != null && dest != null) "$origin-$dest" else null
+            val text = client.get(url) {
+                headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
+            }.bodyAsText()
+            parseAdsbdbRoute(text)
         }
         val duration = System.currentTimeMillis() - startedAt
         val route = outcome.getOrNull()

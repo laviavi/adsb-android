@@ -102,6 +102,8 @@ class FlightAwareEnrichment(
     private val faIdentToIcao = HashMap<String, String>() // current ident → icao, for logging
     private val faOnResult    = HashMap<String, (FaResult) -> Unit>() // ident → latest result callback
     private val rateLimiter   = FaRateLimiter()
+    /** Idents whose current cached result has already been logged once — see [maybeSchedule]. */
+    private val loggedCacheHitIdents = HashSet<String>()
 
     private val client = HttpClient(CIO) {
         engine { requestTimeout = FA_TIMEOUT_MS }
@@ -124,7 +126,8 @@ class FlightAwareEnrichment(
     fun maybeSchedule(icaoHex: String, ident: String, onResult: (FaResult) -> Unit) {
         val now = System.currentTimeMillis()
         var cachedHit: FaResult? = null
-        var hadCacheHit = false
+        var isCacheHit = false
+        var shouldLog = false
         synchronized(lock) {
             val prevIdent = faIdentMap[icaoHex]
             // Callsign upgrade: invalidate registration-keyed state
@@ -135,6 +138,7 @@ class FlightAwareEnrichment(
                 faCache.remove(prevIdent)
                 faOnResult.remove(prevIdent)
                 faIdentToIcao.remove(prevIdent)
+                loggedCacheHitIdents.remove(prevIdent)
             }
             faIdentMap[icaoHex] = ident
             faIdentToIcao[ident] = icaoHex
@@ -142,8 +146,13 @@ class FlightAwareEnrichment(
             faFirstSeen.getOrPut(ident) { now }
 
             if (faCache.containsKey(ident) && faCache[ident] != null) {
-                hadCacheHit = true
+                isCacheHit = true
                 cachedHit = faCache[ident]
+                // A live aircraft calls this on every position update (several times a
+                // second) — only log the first time we see this cached value, not every
+                // re-check. Real export showed 6,123 of 6,181 "flightaware" rows were this
+                // exact re-log, not a genuine attempt.
+                shouldLog = loggedCacheHitIdents.add(ident)
                 return@synchronized
             }
             val firstSeen = faFirstSeen.getValue(ident)
@@ -156,8 +165,10 @@ class FlightAwareEnrichment(
             faLastAttempt[ident] = now
         }
 
-        if (hadCacheHit) {
-            scope.launch { logAttempt(icaoHex, ident, servedFromCache = true, requestUrl = null, result = cachedHit, durationMs = 0) }
+        if (isCacheHit) {
+            if (shouldLog) {
+                scope.launch { logAttempt(icaoHex, ident, servedFromCache = true, requestUrl = null, result = cachedHit, durationMs = 0) }
+            }
             return
         }
         fire(icaoHex, ident, onResult)
@@ -200,6 +211,8 @@ class FlightAwareEnrichment(
             synchronized(lock) {
                 faInFlight.remove(ident)
                 faCache[ident] = result
+                // Fresh value written — the next cache hit against it should log once again.
+                loggedCacheHitIdents.remove(ident)
             }
             result?.let { onResult(it) }
         }
@@ -218,6 +231,7 @@ class FlightAwareEnrichment(
             faCache.remove(ident)
             faOnResult.remove(ident)
             faIdentToIcao.remove(ident)
+            loggedCacheHitIdents.remove(ident)
         }
     }
 

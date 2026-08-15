@@ -156,6 +156,12 @@ class AircraftMetaEnrichment(
         engine { requestTimeout = 8_000 }
     }
 
+    /** icao -> cachedAtMs already logged, so a live aircraft's repeated cache hits (once per
+     *  position update, several times a second) log once per distinct cached value instead of
+     *  flooding the event log — confirmed via a real export: 99% of logged rows were re-logged
+     *  cache checks, not real attempts. */
+    private val loggedCacheHitAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     suspend fun lookup(icao: String): AircraftMeta? {
         val key = icao.uppercase().trim()
         if (key.isEmpty()) return null
@@ -166,7 +172,9 @@ class AircraftMetaEnrichment(
             // Also guarded on read: rows cached before this fix still hold "Null".
             else AircraftMeta(key, cached.registration.present(), cached.manufacturer.present(),
                 cached.model.present(), cached.typeCode.present(), cached.owner.present(), cached.source)
-            logAttempt(key, source = null, servedFromCache = true, requestUrl = null, meta = result, durationMs = 0)
+            if (loggedCacheHitAt.put(key, cached.cachedAtMs) != cached.cachedAtMs) {
+                logAttempt(key, source = null, servedFromCache = true, requestUrl = null, meta = result, durationMs = 0)
+            }
             return result
         }
 

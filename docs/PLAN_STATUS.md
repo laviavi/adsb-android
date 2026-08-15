@@ -2658,3 +2658,73 @@ instead of 72. Revisit only if faceting is still visible on-device at max
 zoom. `dist/adsb-android-v2.0.5.apk` rebuilt in place — `versionCode`/
 `versionName` deliberately left at 37/2.0.5 per Avi's instruction rather
 than bumped to a new version.
+
+## 51. Two real bugs found by reading a real exported enrichment log (2026-08-14, v2.0.6)
+
+Avi exported the log via §50's new button and asked why FlightAware showed
+repeated requests. Parsed the actual export (14,494 rows) rather than
+guessing — found two distinct, confirmed bugs.
+
+**Bug A — cache-hit checks were being logged as if they were new attempts,
+on every single position update.** 14,333 of 14,456 `ENRICHMENT_ATTEMPT`
+rows (99.1%) had `servedFromCache=true`; only 123 were real network
+fetches. One icao (`C02129`) alone produced 4,195 rows, averaging 10.7
+rows/second while live. Root cause: `onAircraftUpdated()` fires on every
+merged ADS-B message and calls `maybeEnrichMeta`/`maybeEnrichRoute`/
+`maybeEnrichFa` every time; the actual network fetch is correctly
+rate-limited/TTL'd, but each class's cache-hit branch logged
+unconditionally on every call, with no dedup on "already logged this exact
+cache hit a moment ago." Fixed by tracking, per class, whether the
+*current* cached value has already been logged once:
+- `AircraftMetaEnrichment`/`RouteEnrichment`: `ConcurrentHashMap<String,
+  Long>` mapping key → the `cachedAtMs` already logged;
+  `map.put(key, cachedAtMs) != cachedAtMs` both updates and detects "new
+  value, log it" atomically. Self-correcting on cache refresh (a new
+  `cachedAtMs` naturally differs) — no explicit clearing needed.
+- `FlightAwareEnrichment`: no timestamp on its in-memory cache, so dedup is
+  a `HashSet<String>` of idents already logged for their *current* cached
+  result, guarded by the existing `lock`. Cleared on ident upgrade
+  (`clearForIcao`'s existing invalidation block), on `fire()` writing a
+  fresh value, and in `clearForIcao` itself — so a manual retry or a
+  genuine new fetch correctly re-arms one fresh log line.
+
+**Bug B — every real (non-cached) `adsbdb-route` fetch was failing.** All
+10 fresh attempts in the export failed with the same error: `Serializer
+for class 'AdsbdbCallsignResponse' is not found.` Root cause, confirmed
+live by curling `api.adsbdb.com/v0/callsign/...` with the exact callsigns
+from the failing rows: adsbdb's `response` field is an **object**
+(`{"flightroute": {...}}`) for a callsign it recognizes, but a plain
+**string** (`"unknown callsign"`, `"invalid callsign: X"`) for one it
+doesn't — confirmed against `C02129` (an ICAO hex mistakenly tried as a
+callsign) and a made-up callsign, both live. The fixed object-shaped
+`@Serializable` class (`AdsbdbCallsignResponse` → `AdsbdbResponseBody` →
+`AdsbdbFlightRoute` → `AdsbdbAirport`) could only decode the object case —
+every miss (i.e. most real-world callsigns) threw instead of resolving to
+"no route." Since routes were always cached negative right after failing,
+this looked identical to "adsbdb genuinely has no route for this
+aircraft," when in fact the lookup was silently broken the entire time.
+
+Fix: replaced the `@Serializable`-class decode with manual `JsonElement`
+parsing (`RouteEnrichment.kt`'s new top-level `parseAdsbdbRoute()`),
+matching the pattern `FlightAwareEnrichment.parse()` already uses — a safe
+`as? JsonObject` cast on `response` means a string response is just "no
+route" instead of a decode exception, and the code is now defensive
+against adsbdb changing shape again. The 4 now-unused `@Serializable` data
+classes were deleted; `RouteEnrichment`'s `HttpClient` no longer needs
+`ContentNegotiation` at all — fetches raw text and parses it directly,
+same as FlightAware's scrape path. Also added the missing `UserAgent`
+header and a `requestTimeout`, matching `AircraftMetaEnrichment`'s already
+proven-working client config.
+
+New `RouteEnrichmentTests.kt`: `parseAdsbdbRoute()` against the exact real
+JSON captured live during this investigation (a working AAL123 route, the
+`C02129` "unknown callsign" case, an "invalid callsign" case, a null
+`flightroute`, and malformed JSON) — locks in both the fix and the exact
+failure mode that caused it.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, `:app:assembleDebug`
+passes. Version bumped to v2.0.6 (`versionCode` 38), debug APK built and
+added to `dist/`. Not verified on-device — Avi should confirm route
+lookups now actually succeed for a recognized callsign, and that the
+enrichment log for a long-lived aircraft stays small instead of growing
+every second.
