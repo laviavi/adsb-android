@@ -18,10 +18,13 @@ import androidx.compose.ui.unit.sp
 import com.laviavi.adsbandroid.aircraft.AircraftState
 import com.laviavi.adsbandroid.aircraft.MessageSummary
 import com.laviavi.adsbandroid.crc.CrcChecker
+import com.laviavi.adsbandroid.data.AircraftEventLogEntity
 import com.laviavi.adsbandroid.ui.components.FreshnessDot
 import com.laviavi.adsbandroid.ui.model.AgeTier
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -29,8 +32,11 @@ import java.util.*
 fun AircraftDetailSheet(
     aircraft: AircraftState,
     onDismiss: () -> Unit,
+    onRetryEnrichment: (String) -> Unit = {},
+    onLoadEventLog: suspend (String) -> List<AircraftEventLogEntity> = { emptyList() },
 ) {
     val now = System.currentTimeMillis()
+    val scope = rememberCoroutineScope()
 
     LazyColumn(
         modifier = Modifier
@@ -155,6 +161,41 @@ fun AircraftDetailSheet(
             }
         }
 
+        // Enrichment log (collapsed by default) — DETECTED/ENRICHMENT_ATTEMPT/MOVED_TO_HISTORY timeline
+        item {
+            var expanded by remember { mutableStateOf(false) }
+            var eventLog by remember(aircraft.icao) { mutableStateOf<List<AircraftEventLogEntity>>(emptyList()) }
+            LaunchedEffect(aircraft.icao, expanded) {
+                if (expanded) eventLog = onLoadEventLog(aircraft.icao)
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = AdsbDimens.SpacingSm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionHeader("ENRICHMENT LOG")
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = {
+                    onRetryEnrichment(aircraft.icao)
+                    scope.launch {
+                        delay(2000)
+                        eventLog = onLoadEventLog(aircraft.icao)
+                    }
+                }) { Text("Retry", fontSize = 12.sp) }
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "▲" else "▼", fontSize = 12.sp)
+                }
+            }
+            if (expanded) {
+                if (eventLog.isEmpty()) {
+                    Text("No events logged yet.", fontSize = 12.sp, color = AdsbColors.TextDisabled)
+                } else {
+                    eventLog.reversed().forEach { e -> EventLogRow(e) }
+                }
+            }
+        }
+
         item { Spacer(Modifier.height(AdsbDimens.SpacingXxl)) }
     }
 }
@@ -259,6 +300,34 @@ private fun MessageRow(msg: MessageSummary) {
             modifier = Modifier.width(68.dp))
         Text(dfLabel, fontSize = 12.sp, color = AdsbColors.TextPrimary, modifier = Modifier.weight(1f))
         Text(crcLabel, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.W600, color = crcColor)
+    }
+}
+
+@Composable
+private fun EventLogRow(e: AircraftEventLogEntity) {
+    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(e.timestampMs))
+    val label = when (e.eventType) {
+        "DETECTED" -> "DETECTED"
+        "MOVED_TO_HISTORY" -> "MOVED TO HISTORY"
+        else -> listOfNotNull(
+            e.source ?: "cache",
+            if (e.servedFromCache == true) "cached" else if (e.servedFromCache == false) "fresh" else null,
+        ).joinToString(" ")
+    }
+    val statusColor = when (e.success) {
+        true -> AdsbColors.Success
+        false -> AdsbColors.Error
+        null -> AdsbColors.TextSecondary
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(timeStr, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.TextSecondary,
+                modifier = Modifier.width(60.dp))
+            Text(label, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.W600, color = statusColor)
+        }
+        e.resultSummary?.let {
+            Text(it, fontSize = 11.sp, color = AdsbColors.TextDisabled, modifier = Modifier.padding(start = 66.dp))
+        }
     }
 }
 

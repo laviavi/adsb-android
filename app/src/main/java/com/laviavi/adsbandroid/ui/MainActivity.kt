@@ -119,6 +119,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onResetCounters = { pipelineService?.resetStatsCounters() },
                     onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
+                    onRetryEnrichment = { icao -> pipelineService?.retryEnrichment(icao) },
+                    onLoadEventLog = { icao -> pipelineService?.eventLogFor(icao) ?: emptyList() },
                     driverInstalled = UsbHotplugReceiver.isDriverInstalled(this@MainActivity),
                     onExit = {
                         // exit() blocks (bounded) until the service has actually released
@@ -173,6 +175,8 @@ private fun AdsbScaffold(
     onShareHistory: () -> Unit,
     onResetCounters: () -> Unit,
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
+    onRetryEnrichment: (String) -> Unit,
+    onLoadEventLog: suspend (String) -> List<com.laviavi.adsbandroid.data.AircraftEventLogEntity>,
     driverInstalled: Boolean,
     onExit: () -> Unit,
 ) {
@@ -367,6 +371,8 @@ private fun AdsbScaffold(
                 AircraftDetailSheet(
                     aircraft = selectedAircraft!!,
                     onDismiss = { viewModel.selectAircraft(null) },
+                    onRetryEnrichment = onRetryEnrichment,
+                    onLoadEventLog = onLoadEventLog,
                 )
             }
         }

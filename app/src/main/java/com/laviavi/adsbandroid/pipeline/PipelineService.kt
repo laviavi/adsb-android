@@ -76,6 +76,7 @@ class PipelineService : Service() {
     @Inject lateinit var bestRangeDao: com.laviavi.adsbandroid.data.BestRangeDao
     @Inject lateinit var enrichmentDao: EnrichmentCacheDao
     @Inject lateinit var aircraftMetaCacheDao: AircraftMetaCacheDao
+    @Inject lateinit var eventLogDao: com.laviavi.adsbandroid.data.AircraftEventLogDao
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
@@ -103,9 +104,9 @@ class PipelineService : Service() {
     private val rawLogger by lazy { RawMessageLogger(applicationContext) }
     private val performanceCsvLogger by lazy { PerformanceCsvLogger(applicationContext) }
     private val coverageCsvLogger by lazy { CoverageCsvLogger(applicationContext) }
-    private val routeEnrichment by lazy { RouteEnrichment(enrichmentDao) }
-    private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao) }
-    private val flightAwareEnrichment by lazy { FlightAwareEnrichment(serviceScope) }
+    private val routeEnrichment by lazy { RouteEnrichment(enrichmentDao, eventLogDao) }
+    private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao, eventLogDao) }
+    private val flightAwareEnrichment by lazy { FlightAwareEnrichment(serviceScope, eventLogDao) }
     // ConcurrentHashMap-backed, not a plain HashSet: add() runs on
     // ReceiverRepository's confined dispatcher (onAircraftUpdated), remove()
     // runs on a Dispatchers.IO worker thread once the async lookup finishes —
@@ -119,6 +120,8 @@ class PipelineService : Service() {
     // restart (a fresh set) can.
     private val routeLookupInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val metaLookupInFlight  = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Icaos already given a DETECTED event-log row this process lifetime — logged once per sighting, not once per message. */
+    private val detectionLogged = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private val locationProvider by lazy { GpsLocationProvider(applicationContext) }
     private val observerPosition = ObserverPositionResolver()
@@ -347,6 +350,7 @@ class PipelineService : Service() {
                 val cutoff = System.currentTimeMillis() - 7 * 24 * 3600 * 1000L
                 runCatching { historyDao.purgeOlderThan(cutoff) }
                 runCatching { seenDao.purgeOlderThan(cutoff) }
+                runCatching { eventLogDao.purgeOlderThan(cutoff) }
             }
         }
         // Load the last selected source/config before starting - without this, every
@@ -688,6 +692,7 @@ class PipelineService : Service() {
         lastHistoryInsertMs.clear()
         routeLookupInFlight.clear()
         metaLookupInFlight.clear()
+        detectionLogged.clear()
         _sessionMaxRangeNm.value = null
         // Reset runs on the repository's own confined dispatcher and is
         // submitted before startPipeline(), so it always finishes ahead of the
@@ -815,6 +820,16 @@ class PipelineService : Service() {
     private fun recordDeparted(departed: List<AircraftState>) {
         serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             departed.forEach { s ->
+                val movedAtMs = System.currentTimeMillis()
+                runCatching {
+                    eventLogDao.insert(
+                        com.laviavi.adsbandroid.data.AircraftEventLogEntity(
+                            icao = s.icao, timestampMs = movedAtMs, eventType = "MOVED_TO_HISTORY",
+                            source = null, requestKey = null, requestUrl = null,
+                            servedFromCache = null, success = null, resultSummary = null, durationMs = null,
+                        )
+                    )
+                }
                 runCatching {
                     seenDao.upsert(AircraftSeenEntity(
                         icao          = s.icao,
@@ -1053,11 +1068,28 @@ class PipelineService : Service() {
      * the position track log and the async route lookup.
      */
     private fun onAircraftUpdated(state: AircraftState) {
+        maybeLogDetection(state)
         maybeInsertHistory(state)
         maybeEnrichRoute(state)
         maybeEnrichMeta(state)
         maybeEnrichFa(state)
         state.distanceNm?.let { d -> if (d > (_sessionMaxRangeNm.value ?: -1.0)) _sessionMaxRangeNm.value = d }
+    }
+
+    /** First DETECTED row for an icao this process lifetime — the start of its event-log timeline. */
+    private fun maybeLogDetection(state: AircraftState) {
+        if (!detectionLogged.add(state.icao)) return
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching {
+                eventLogDao.insert(
+                    com.laviavi.adsbandroid.data.AircraftEventLogEntity(
+                        icao = state.icao, timestampMs = state.firstSeenMs, eventType = "DETECTED",
+                        source = null, requestKey = null, requestUrl = null,
+                        servedFromCache = null, success = null, resultSummary = null, durationMs = null,
+                    )
+                )
+            }
+        }
     }
 
     /** Async route lookup, gated by config, cached, at most once in flight per ICAO. */
@@ -1070,7 +1102,7 @@ class PipelineService : Service() {
         if (Airlines.isRegistrationCallsign(callsign)) return
         if (!routeLookupInFlight.add(state.icao)) return
         serviceScope.launch(Dispatchers.IO) {
-            runCatching { routeEnrichment.lookupRoute(callsign) }.getOrNull()?.let { route ->
+            runCatching { routeEnrichment.lookupRoute(state.icao, callsign) }.getOrNull()?.let { route ->
                 // No explicit publish: the repository's 4 Hz ticker picks up the new route.
                 receiverRepository.setRoute(state.icao, route)
             }
@@ -1097,7 +1129,7 @@ class PipelineService : Service() {
         // (Registration.fromIcao) with no network round trip needed. FlightAware
         // usually has no data indexed under a raw Mode S hex, but attempting it
         // costs nothing extra: FlightAwareEnrichment's own caching/throttling
-        // (4s initial delay, 30s retry) already governs how often this is tried,
+        // (5s initial delay, 30s retry) already governs how often this is tried,
         // same as any other ident that keeps failing.
         val ident = state.callsign?.trim()?.takeIf { it.isNotEmpty() }
             ?: state.registration?.trim()?.takeIf { it.isNotEmpty() }
@@ -1118,6 +1150,35 @@ class PipelineService : Service() {
                 }
                 val airlineName = fa.airlineName.takeIf { it.isNotEmpty() }
                 receiverRepository.setFaResult(state.icao, route, airlineName, typeDisplay)
+            }
+        }
+    }
+
+    /** Full event-log timeline for one aircraft, oldest first — backs the detail screen's log viewer. */
+    suspend fun eventLogFor(icao: String): List<com.laviavi.adsbandroid.data.AircraftEventLogEntity> =
+        runCatching { eventLogDao.forIcao(icao.uppercase().trim()) }.getOrElse { emptyList() }
+
+    /**
+     * Manual "retry enrichment now" action for one aircraft: clears its cached
+     * meta/route rows and FlightAware in-memory state, then re-triggers all three
+     * lookups immediately. Scoped to a single icao, replacing the old "clear all
+     * app data and hope" workaround.
+     */
+    fun retryEnrichment(icao: String) {
+        val key = icao.uppercase().trim()
+        val state = aircraft.value.find { it.icao == key }
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching { aircraftMetaCacheDao.deleteByIcao(key) }
+            state?.callsign?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }?.let { callsign ->
+                runCatching { enrichmentDao.deleteByKey(callsign) }
+            }
+            flightAwareEnrichment.clearForIcao(key)
+            metaLookupInFlight.remove(key)
+            routeLookupInFlight.remove(key)
+            if (state != null) {
+                maybeEnrichRoute(state)
+                maybeEnrichMeta(state)
+                maybeEnrichFa(state)
             }
         }
     }

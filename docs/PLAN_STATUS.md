@@ -2526,3 +2526,78 @@ MapLibre branding, it's the OpenStreetMap/OpenFreeMap data license's
 required credit (ODbL), a legal question distinct from a cosmetic logo,
 and wasn't asked to be removed. `:app:testDebugUnitTest` passes. Version
 bumped to v2.0.3 (`versionCode` 35), debug APK built and added to `dist/`.
+
+## 49. Enrichment audit log: per-aircraft DETECTED/attempt/MOVED_TO_HISTORY timeline + manual retry (2026-08-14, v2.0.4)
+
+Triggered by a live investigation of ICAO C027D7 showing no enrichment
+despite hexdb.io and adsbdb both having real data for it (confirmed via
+direct curl during the investigation) — the app kept no record of what was
+actually requested, what came back, or whether an attempt was a fresh
+network call or a cached miss being replayed, so the cause could only be
+narrowed to "probably a stale cached negative result," not confirmed.
+
+New table `aircraft_event_log` (`AppDatabase.kt`, `MIGRATION_7_8`, version
+7→8): one row per `DETECTED` / `ENRICHMENT_ATTEMPT` / `MOVED_TO_HISTORY`
+event, keyed by icao, with `source`, `requestKey`, `requestUrl`,
+`servedFromCache`, `success`, `resultSummary`, `durationMs`. Purged by the
+existing hourly 7-day-cutoff loop in `PipelineService.kt` alongside
+`aircraft_history`/`aircraft_seen` — no new scheduling.
+
+Logging hooks:
+- `onAircraftUpdated` logs one `DETECTED` row per icao per process lifetime
+  (`state.firstSeenMs`), tracked via a `ConcurrentHashMap.newKeySet<String>()`
+  the same way `metaLookupInFlight`/`routeLookupInFlight` already are.
+- `recordDeparted` logs `MOVED_TO_HISTORY` at actual eviction wall-clock
+  time — a fact not previously captured anywhere (`lastSeenMs` is
+  last-message time, not eviction time).
+- All 5 real fetch sites (`AircraftMetaEnrichment`: hexdb, OpenSky,
+  adsbdb-aircraft; `RouteEnrichment`: adsbdb-route; `FlightAwareEnrichment`:
+  flightaware) log `ENRICHMENT_ATTEMPT` with the exact URL, timing, and a
+  short result summary — including the cache-hit path, so a report now
+  distinguishes "just checked live and found nothing" from "replaying a
+  result cached before this session's fixes landed," which is precisely
+  the ambiguity that stalled the C027D7 investigation.
+- `RouteEnrichment` previously had **zero** logging of any kind (confirmed
+  by grep before this change) — this closes that gap, not just adds to it.
+  `lookupRoute` gained an `icao` parameter (was callsign-only) purely so
+  the audit rows can be keyed correctly.
+
+Manual retry: `PipelineService.retryEnrichment(icao)` clears that icao's
+`aircraft_meta_cache` and `enrichment_cache` rows (new DAO
+`deleteByIcao`/`deleteByKey` queries) and `FlightAwareEnrichment`'s
+in-memory state for whatever ident that icao currently maps to (new
+`clearForIcao`), then immediately re-invokes `maybeEnrichMeta`/
+`maybeEnrichRoute`/`maybeEnrichFa` — scoped to one aircraft, replacing the
+"clear all app data and hope" workaround the C027D7 investigation had to
+fall back on.
+
+UI: `AircraftDetailSheet.kt` gained a collapsible "ENRICHMENT LOG" section
+(same collapsed-by-default pattern as the existing message timeline) with
+a "Retry" button, backed by a new `PipelineService.eventLogFor(icao)`
+suspend query threaded through `MainActivity`'s existing bound-service
+callback pattern. Only wired into the live-aircraft sheet — this app has
+no detail view at all for a departed/History aircraft yet, so the log is
+visible only while an aircraft is still live; adding a History detail
+sheet is a separate, larger piece of work, not part of this change.
+
+Two enrichment ideas raised but deliberately not built this round: dropping
+OpenSky's aircraft-metadata endpoint from the source rotation (confirmed
+gone, 410, permanently — every meta lookup still queries and always fails
+it); and a bundled offline ICAO→registration/type database generated from
+OpenSky's bulk aircraft dump, which would resolve most aircraft instantly
+without depending on any of the 3 live sources being up.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass —
+`AppDatabaseMigrationTests.kt`'s 4 fixture builders needed `MIGRATION_7_8`
+added to their `addMigrations(...)` calls (they build against
+`AppDatabase::class.java`, which now targets version 8; without it Room
+had no 1→8 path and every test in the file failed with "migration
+required but not found"). `:app:assembleDebug` passes. Version bumped to
+v2.0.4 (`versionCode` 36), debug APK built and added to `dist/`.
+
+Not verified on-device — no physical device is reachable from this
+sandbox. Avi should confirm on the phone: open a live aircraft's detail
+sheet, expand ENRICHMENT LOG, confirm DETECTED appears and
+ENRICHMENT_ATTEMPT rows accumulate per source with real URLs/results; hit
+Retry and confirm fresh rows appear a couple seconds later; let an
+aircraft depart and confirm MOVED_TO_HISTORY logs.

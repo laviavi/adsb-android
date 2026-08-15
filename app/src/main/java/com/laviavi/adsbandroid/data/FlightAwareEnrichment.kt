@@ -88,7 +88,10 @@ internal class FaRateLimiter(
  *
  * Mirrors Python lookup.py _maybe_schedule_fa + flightaware.py fetch_fa_result.
  */
-class FlightAwareEnrichment(private val scope: CoroutineScope) {
+class FlightAwareEnrichment(
+    private val scope: CoroutineScope,
+    private val eventLogDao: AircraftEventLogDao,
+) {
 
     private val lock          = Any()
     private val faFirstSeen   = HashMap<String, Long>()   // ident → first-seen ms
@@ -96,6 +99,7 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
     private val faInFlight    = HashSet<String>()         // idents currently fetching
     private val faCache       = HashMap<String, FaResult?>() // null = tried+failed
     private val faIdentMap    = HashMap<String, String>() // icao → current ident
+    private val faIdentToIcao = HashMap<String, String>() // current ident → icao, for logging
     private val faOnResult    = HashMap<String, (FaResult) -> Unit>() // ident → latest result callback
     private val rateLimiter   = FaRateLimiter()
 
@@ -119,6 +123,8 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
      */
     fun maybeSchedule(icaoHex: String, ident: String, onResult: (FaResult) -> Unit) {
         val now = System.currentTimeMillis()
+        var cachedHit: FaResult? = null
+        var hadCacheHit = false
         synchronized(lock) {
             val prevIdent = faIdentMap[icaoHex]
             // Callsign upgrade: invalidate registration-keyed state
@@ -128,12 +134,18 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
                 faInFlight.remove(prevIdent)
                 faCache.remove(prevIdent)
                 faOnResult.remove(prevIdent)
+                faIdentToIcao.remove(prevIdent)
             }
             faIdentMap[icaoHex] = ident
+            faIdentToIcao[ident] = icaoHex
             faOnResult[ident] = onResult
             faFirstSeen.getOrPut(ident) { now }
 
-            if (faCache.containsKey(ident) && faCache[ident] != null) return  // already have result
+            if (faCache.containsKey(ident) && faCache[ident] != null) {
+                hadCacheHit = true
+                cachedHit = faCache[ident]
+                return@synchronized
+            }
             val firstSeen = faFirstSeen.getValue(ident)
             if (!isFirstAttemptDue(firstSeen, now)) return
             val lastAttempt = faLastAttempt[ident] ?: 0L
@@ -144,7 +156,11 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
             faLastAttempt[ident] = now
         }
 
-        fire(ident, onResult)
+        if (hadCacheHit) {
+            scope.launch { logAttempt(icaoHex, ident, servedFromCache = true, requestUrl = null, result = cachedHit, durationMs = 0) }
+            return
+        }
+        fire(icaoHex, ident, onResult)
     }
 
     /**
@@ -170,13 +186,17 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
                 faLastAttempt[ident] = now
                 faOnResult[ident]
             } ?: continue
-            fire(ident, onResult)
+            val icao = synchronized(lock) { faIdentToIcao[ident] } ?: ident
+            fire(icao, ident, onResult)
         }
     }
 
-    private fun fire(ident: String, onResult: (FaResult) -> Unit) {
+    private fun fire(icaoHex: String, ident: String, onResult: (FaResult) -> Unit) {
         scope.launch(Dispatchers.IO) {
+            val url = "https://www.flightaware.com/live/flight/$ident"
+            val startedAt = System.currentTimeMillis()
             val result = fetchFaResult(ident)
+            logAttempt(icaoHex, ident, servedFromCache = false, requestUrl = url, result = result, durationMs = System.currentTimeMillis() - startedAt)
             synchronized(lock) {
                 faInFlight.remove(ident)
                 faCache[ident] = result
@@ -187,6 +207,19 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
 
     /** Releases the underlying HTTP engine's connection pool/threads. The sweep loop dies with [scope]. */
     fun close() = client.close()
+
+    /** Drops cached/in-flight state for whatever ident [icaoHex] currently maps to, so the next [maybeSchedule] call re-fetches instead of replaying a stale result. */
+    fun clearForIcao(icaoHex: String) {
+        synchronized(lock) {
+            val ident = faIdentMap.remove(icaoHex) ?: return
+            faFirstSeen.remove(ident)
+            faLastAttempt.remove(ident)
+            faInFlight.remove(ident)
+            faCache.remove(ident)
+            faOnResult.remove(ident)
+            faIdentToIcao.remove(ident)
+        }
+    }
 
     private suspend fun fetchFaResult(ident: String): FaResult? = runCatching {
         val html = client.get("https://www.flightaware.com/live/flight/$ident") {
@@ -201,6 +234,26 @@ class FlightAwareEnrichment(private val scope: CoroutineScope) {
         null
     }
 
+    private suspend fun logAttempt(icaoHex: String, ident: String, servedFromCache: Boolean, requestUrl: String?, result: FaResult?, durationMs: Long) {
+        runCatching {
+            eventLogDao.insert(
+                AircraftEventLogEntity(
+                    icao = icaoHex, timestampMs = System.currentTimeMillis(), eventType = "ENRICHMENT_ATTEMPT",
+                    source = "flightaware", requestKey = ident, requestUrl = requestUrl, servedFromCache = servedFromCache,
+                    success = result != null, resultSummary = result.summarize(), durationMs = durationMs,
+                )
+            )
+        }
+    }
+}
+
+private fun FaResult?.summarize(): String {
+    if (this == null) return "no data"
+    return listOfNotNull(
+        if (hasRoute()) "route=$origin-$destination" else null,
+        typeCode.takeIf { it.isNotEmpty() }?.let { "type=$it" },
+        airlineName.takeIf { it.isNotEmpty() }?.let { "airline=$it" },
+    ).ifEmpty { listOf("empty result") }.joinToString(" ")
 }
 
 /**

@@ -163,6 +163,9 @@ data class EnrichmentCacheEntity(
     suspend fun get(key: String): EnrichmentCacheEntity?
     @Query("DELETE FROM enrichment_cache WHERE cachedAtMs < :cutoffMs")
     suspend fun purgeExpired(cutoffMs: Long)
+    /** Used by the aircraft detail screen's "retry enrichment" action to force a fresh lookup. */
+    @Query("DELETE FROM enrichment_cache WHERE key = :key")
+    suspend fun deleteByKey(key: String)
 }
 
 @Entity(tableName = "aircraft_meta_cache")
@@ -182,6 +185,46 @@ data class AircraftMetaCacheEntity(
     suspend fun insert(entity: AircraftMetaCacheEntity)
     @Query("SELECT * FROM aircraft_meta_cache WHERE icao = :icao")
     suspend fun get(icao: String): AircraftMetaCacheEntity?
+    /** Used by the aircraft detail screen's "retry enrichment" action to force a fresh lookup. */
+    @Query("DELETE FROM aircraft_meta_cache WHERE icao = :icao")
+    suspend fun deleteByIcao(icao: String)
+}
+
+/**
+ * One row per aircraft lifecycle/enrichment event: first detection, every enrichment
+ * source actually queried (or served from cache) with what was requested and what
+ * came back, and when the aircraft moved from the live table into history. Built to
+ * answer "why didn't this aircraft get enriched" from the phone directly, without
+ * reproducing the request live.
+ */
+@Entity(tableName = "aircraft_event_log", indices = [Index("icao"), Index("timestampMs")])
+data class AircraftEventLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val icao: String,
+    val timestampMs: Long,
+    /** "DETECTED" | "ENRICHMENT_ATTEMPT" | "MOVED_TO_HISTORY" */
+    val eventType: String,
+    /** "hexdb" | "opensky" | "adsbdb-aircraft" | "adsbdb-route" | "flightaware" — null for DETECTED/MOVED_TO_HISTORY. */
+    val source: String?,
+    /** What was actually queried: the icao, the FlightAware ident, or the callsign. */
+    val requestKey: String?,
+    /** The exact URL called — reproducible with one curl. */
+    val requestUrl: String?,
+    /** true = short-circuited on a cached result, false = a real network call, null for non-enrichment events. */
+    val servedFromCache: Boolean?,
+    val success: Boolean?,
+    /** Short human string: "reg=C-FPCG type=DHC2 owner=Seair Seaplanes" / "no data" / "error: <message>". */
+    val resultSummary: String?,
+    val durationMs: Long?,
+)
+
+@Dao interface AircraftEventLogDao {
+    @Insert
+    suspend fun insert(entity: AircraftEventLogEntity)
+    @Query("SELECT * FROM aircraft_event_log WHERE icao = :icao ORDER BY timestampMs ASC")
+    suspend fun forIcao(icao: String): List<AircraftEventLogEntity>
+    @Query("DELETE FROM aircraft_event_log WHERE timestampMs < :cutoffMs")
+    suspend fun purgeOlderThan(cutoffMs: Long)
 }
 
 @Database(
@@ -193,8 +236,9 @@ data class AircraftMetaCacheEntity(
         AircraftVisitEntity::class,
         CoverageSampleEntity::class,
         BestRangeRecordEntity::class,
+        AircraftEventLogEntity::class,
     ],
-    version = 7,
+    version = 8,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftHistoryDao(): AircraftHistoryDao
@@ -204,6 +248,32 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftVisitDao(): AircraftVisitDao
     abstract fun coverageSampleDao(): CoverageSampleDao
     abstract fun bestRangeDao(): BestRangeDao
+    abstract fun aircraftEventLogDao(): AircraftEventLogDao
+}
+
+/** v7 -> v8: added `aircraft_event_log`, the per-aircraft detection/enrichment/departure audit trail. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `aircraft_event_log` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `icao` TEXT NOT NULL,
+                `timestampMs` INTEGER NOT NULL,
+                `eventType` TEXT NOT NULL,
+                `source` TEXT,
+                `requestKey` TEXT,
+                `requestUrl` TEXT,
+                `servedFromCache` INTEGER,
+                `success` INTEGER,
+                `resultSummary` TEXT,
+                `durationMs` INTEGER
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_aircraft_event_log_icao` ON `aircraft_event_log` (`icao`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_aircraft_event_log_timestampMs` ON `aircraft_event_log` (`timestampMs`)")
+    }
 }
 
 /**

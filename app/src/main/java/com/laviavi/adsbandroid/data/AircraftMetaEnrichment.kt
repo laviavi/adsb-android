@@ -147,6 +147,7 @@ internal fun mergeSources(icao: String, vararg results: AircraftMeta?): Aircraft
  */
 class AircraftMetaEnrichment(
     private val cacheDao: AircraftMetaCacheDao,
+    private val eventLogDao: AircraftEventLogDao,
 ) {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -161,10 +162,12 @@ class AircraftMetaEnrichment(
 
         val cached = cacheDao.get(key)
         if (cached != null && isCacheFresh(cached.cachedAtMs, System.currentTimeMillis())) {
-            return if (cached.source == "none") null
+            val result = if (cached.source == "none") null
             // Also guarded on read: rows cached before this fix still hold "Null".
             else AircraftMeta(key, cached.registration.present(), cached.manufacturer.present(),
                 cached.model.present(), cached.typeCode.present(), cached.owner.present(), cached.source)
+            logAttempt(key, source = null, servedFromCache = true, requestUrl = null, meta = result, durationMs = 0)
+            return result
         }
 
         val meta = if (key.startsWith("A")) lookupUs(key) else lookupIntl(key)
@@ -203,42 +206,79 @@ class AircraftMetaEnrichment(
         mergeSources(icao, hexdb.await(), opensky.await(), adsbdb.await())
     }
 
-    private suspend fun fetchHexdb(icao: String): AircraftMeta? = runCatching {
-        val resp: HexdbResponse = client.get("https://hexdb.io/api/v1/aircraft/${icao.lowercase()}") {
-            headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
-        }.body()
-        mapHexdbResponse(icao, resp)
-    }.getOrElse {
-        Log.d(TAG, "hexdb.io error for $icao: $it")
-        null
+    private suspend fun fetchHexdb(icao: String): AircraftMeta? {
+        val url = "https://hexdb.io/api/v1/aircraft/${icao.lowercase()}"
+        val startedAt = System.currentTimeMillis()
+        val meta = runCatching {
+            val resp: HexdbResponse = client.get(url) {
+                headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
+            }.body()
+            mapHexdbResponse(icao, resp)
+        }.getOrElse {
+            Log.d(TAG, "hexdb.io error for $icao: $it")
+            null
+        }
+        logAttempt(icao, "hexdb", false, url, meta, System.currentTimeMillis() - startedAt)
+        return meta
     }
 
-    private suspend fun fetchOpenSky(icao: String): AircraftMeta? = runCatching {
-        val resp: OpenSkyResponse = client.get(
-            "https://opensky-network.org/api/metadata/aircraft/icao/${icao.lowercase()}"
-        ) {
-            headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
-        }.body()
-        val reg  = resp.registration.present()
-        val mfr  = resp.manufacturername.present()
-        val mdl  = resp.model.present()
-        val tc   = resp.typecode.present()?.uppercase()
-        if (reg == null && mfr == null && mdl == null) return@runCatching null
-        AircraftMeta(icao, reg, mfr, mdl, tc, null, "opensky")
-    }.getOrElse {
-        Log.d(TAG, "OpenSky error for $icao: $it")
-        null
+    private suspend fun fetchOpenSky(icao: String): AircraftMeta? {
+        val url = "https://opensky-network.org/api/metadata/aircraft/icao/${icao.lowercase()}"
+        val startedAt = System.currentTimeMillis()
+        val meta = runCatching {
+            val resp: OpenSkyResponse = client.get(url) {
+                headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
+            }.body()
+            val reg  = resp.registration.present()
+            val mfr  = resp.manufacturername.present()
+            val mdl  = resp.model.present()
+            val tc   = resp.typecode.present()?.uppercase()
+            if (reg == null && mfr == null && mdl == null) return@runCatching null
+            AircraftMeta(icao, reg, mfr, mdl, tc, null, "opensky")
+        }.getOrElse {
+            Log.d(TAG, "OpenSky error for $icao: $it")
+            null
+        }
+        logAttempt(icao, "opensky", false, url, meta, System.currentTimeMillis() - startedAt)
+        return meta
     }
 
-    private suspend fun fetchAdsbdb(icao: String): AircraftMeta? = runCatching {
-        val resp: AdsbdbAircraftResponse = client.get(
-            "https://api.adsbdb.com/v0/aircraft/${icao.lowercase()}"
-        ) {
-            headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
-        }.body()
-        resp.response?.aircraft?.let { mapAdsbdbFields(icao, it) }
-    }.getOrElse {
-        Log.d(TAG, "adsbdb error for $icao: $it")
-        null
+    private suspend fun fetchAdsbdb(icao: String): AircraftMeta? {
+        val url = "https://api.adsbdb.com/v0/aircraft/${icao.lowercase()}"
+        val startedAt = System.currentTimeMillis()
+        val meta = runCatching {
+            val resp: AdsbdbAircraftResponse = client.get(url) {
+                headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
+            }.body()
+            resp.response?.aircraft?.let { mapAdsbdbFields(icao, it) }
+        }.getOrElse {
+            Log.d(TAG, "adsbdb error for $icao: $it")
+            null
+        }
+        logAttempt(icao, "adsbdb-aircraft", false, url, meta, System.currentTimeMillis() - startedAt)
+        return meta
     }
+
+    private suspend fun logAttempt(
+        icao: String, source: String?, servedFromCache: Boolean, requestUrl: String?, meta: AircraftMeta?, durationMs: Long,
+    ) {
+        runCatching {
+            eventLogDao.insert(
+                AircraftEventLogEntity(
+                    icao = icao, timestampMs = System.currentTimeMillis(), eventType = "ENRICHMENT_ATTEMPT",
+                    source = source, requestKey = icao, requestUrl = requestUrl, servedFromCache = servedFromCache,
+                    success = meta != null, resultSummary = meta.summarize(), durationMs = durationMs,
+                )
+            )
+        }
+    }
+}
+
+private fun AircraftMeta?.summarize(): String {
+    if (this == null) return "no data"
+    return listOfNotNull(
+        registration?.let { "reg=$it" },
+        typeCode?.let { "type=$it" },
+        owner?.let { "owner=$it" },
+    ).ifEmpty { listOf("no data") }.joinToString(" ")
 }
