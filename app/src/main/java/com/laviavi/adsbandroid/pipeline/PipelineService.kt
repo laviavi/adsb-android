@@ -179,6 +179,16 @@ class PipelineService : Service() {
         }
     }
 
+    /** Writes the full enrichment/detection event log (every icao, live or departed) to a CSV; null on failure. */
+    fun exportEventLogCsv(onResult: (java.io.File?) -> Unit = {}) {
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val file = runCatching {
+                com.laviavi.adsbandroid.data.CsvExporter.exportEventLog(applicationContext, eventLogDao)
+            }.getOrNull()
+            onResult(file)
+        }
+    }
+
     /** User-triggered from the Live screen's overflow menu — zeroes session totals without a reconnect. */
     fun resetStatsCounters() {
         stats.reset()

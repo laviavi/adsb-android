@@ -48,6 +48,7 @@ fun TrafficScreen(
     onResetCounters: () -> Unit,
     onClearHistory: () -> Unit,
     onShareHistory: () -> Unit,
+    onShareEventLog: () -> Unit,
     onExit: () -> Unit,
 ) {
     val history by viewModel.history.collectAsStateWithLifecycle()
@@ -98,7 +99,9 @@ fun TrafficScreen(
                     onStart = onStart,
                     sourceState = sourceState,
                 )
-                TrafficTab.HISTORY -> HistoryScreen(entries = history, onClear = onClearHistory, onShare = onShareHistory)
+                TrafficTab.HISTORY -> HistoryScreen(
+                    entries = history, onClear = onClearHistory, onShare = onShareHistory, onShareEventLog = onShareEventLog,
+                )
                 TrafficTab.STATS -> StatsScreen(visits = visits)
             }
         }

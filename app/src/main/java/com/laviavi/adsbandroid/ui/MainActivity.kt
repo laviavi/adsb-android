@@ -117,6 +117,11 @@ class MainActivity : ComponentActivity() {
                             if (file != null) shareCsv(this@MainActivity, file)
                         }
                     },
+                    onShareEventLog = {
+                        pipelineService?.exportEventLogCsv { file ->
+                            if (file != null) shareCsv(this@MainActivity, file, "Share enrichment log")
+                        }
+                    },
                     onResetCounters = { pipelineService?.resetStatsCounters() },
                     onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
                     onRetryEnrichment = { icao -> pipelineService?.retryEnrichment(icao) },
@@ -153,14 +158,14 @@ class MainActivity : ComponentActivity() {
 private const val ROUTE_OFFLINE_MAPS = "offline_maps"
 
 /** Opens the system share sheet for a CSV written under external app storage. */
-private fun shareCsv(context: android.content.Context, file: java.io.File) {
+private fun shareCsv(context: android.content.Context, file: java.io.File, chooserTitle: String = "Share history") {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/csv"
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, "Share history"))
+    context.startActivity(Intent.createChooser(intent, chooserTitle))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -173,6 +178,7 @@ private fun AdsbScaffold(
     onReconnect: () -> Unit,
     onClearHistory: () -> Unit,
     onShareHistory: () -> Unit,
+    onShareEventLog: () -> Unit,
     onResetCounters: () -> Unit,
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
     onRetryEnrichment: (String) -> Unit,
@@ -293,6 +299,7 @@ private fun AdsbScaffold(
                         onResetCounters = onResetCounters,
                         onClearHistory = onClearHistory,
                         onShareHistory = onShareHistory,
+                        onShareEventLog = onShareEventLog,
                         onExit = onExit,
                     )
                 }

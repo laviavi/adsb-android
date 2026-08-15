@@ -55,4 +55,31 @@ object CsvExporter {
         val v = value ?: return ""
         return if (v.any { it == ',' || it == '"' || it == '\n' }) "\"${v.replace("\"", "\"\"")}\"" else v
     }
+
+    private const val EVENT_LOG_HEADER = "icao,timestamp,event_type,source,request_key,request_url," +
+        "served_from_cache,success,result_summary,duration_ms\n"
+
+    private fun eventTimestampFormat() = SimpleDateFormat("MM/dd/yyyy HH:mm:ss", Locale.US)
+
+    /**
+     * Exports the full aircraft_event_log table (every icao, live or since departed) to a
+     * shareable CSV — the table itself is never gated on live/history status, only on the
+     * existing 7-day purge, so this is the way to get at a departed aircraft's log.
+     */
+    suspend fun exportEventLog(context: Context, dao: AircraftEventLogDao): File {
+        val rows = dao.getAll()
+        val fmt = eventTimestampFormat()
+        val file = File(context.getExternalFilesDir(null), "enrichment_log_${System.currentTimeMillis()}.csv")
+        file.bufferedWriter().use { w ->
+            w.write(EVENT_LOG_HEADER)
+            for (r in rows) {
+                w.write(
+                    "${r.icao},${fmt.format(Date(r.timestampMs))},${csv(r.eventType)},${csv(r.source)}," +
+                        "${csv(r.requestKey)},${csv(r.requestUrl)},${r.servedFromCache ?: ""},${r.success ?: ""}," +
+                        "${csv(r.resultSummary)},${r.durationMs ?: ""}\n",
+                )
+            }
+        }
+        return file
+    }
 }

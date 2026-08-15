@@ -40,6 +40,7 @@ fun HistoryScreen(
     entries: List<AircraftSeenEntity>,
     onClear: () -> Unit,
     onShare: () -> Unit,
+    onShareEventLog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var filter by remember { mutableStateOf("") }
@@ -89,6 +90,10 @@ fun HistoryScreen(
                 color = AdsbColors.TextPrimary,
                 modifier = Modifier.weight(1f),
             )
+            // Event log covers every icao ever logged, independent of aircraft_seen (this
+            // screen's own data) — always offered, not gated on `entries` being non-empty,
+            // since it's the only way to retrieve a departed aircraft's enrichment log.
+            TextButton(onClick = onShareEventLog) { Text("Share log", color = AdsbColors.Primary) }
             if (entries.isNotEmpty()) {
                 TextButton(onClick = onShare) { Text("Share", color = AdsbColors.Primary) }
                 TextButton(onClick = onClear) { Text("Clear", color = AdsbColors.Primary) }

@@ -223,6 +223,9 @@ data class AircraftEventLogEntity(
     suspend fun insert(entity: AircraftEventLogEntity)
     @Query("SELECT * FROM aircraft_event_log WHERE icao = :icao ORDER BY timestampMs ASC")
     suspend fun forIcao(icao: String): List<AircraftEventLogEntity>
+    /** Every logged event across every icao, newest first — independent of live/history status, backs the CSV export. */
+    @Query("SELECT * FROM aircraft_event_log ORDER BY timestampMs DESC")
+    suspend fun getAll(): List<AircraftEventLogEntity>
     @Query("DELETE FROM aircraft_event_log WHERE timestampMs < :cutoffMs")
     suspend fun purgeOlderThan(cutoffMs: Long)
 }

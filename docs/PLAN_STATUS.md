@@ -2601,3 +2601,45 @@ sheet, expand ENRICHMENT LOG, confirm DETECTED appears and
 ENRICHMENT_ATTEMPT rows accumulate per source with real URLs/results; hit
 Retry and confirm fresh rows appear a couple seconds later; let an
 aircraft depart and confirm MOVED_TO_HISTORY logs.
+
+## 50. Enrichment log export/share — the fix for §49's "vanishes once departed" gap (2026-08-14, v2.0.5)
+
+§49 shipped the log but left it reachable only from the live aircraft
+detail sheet — once an aircraft moved to History there was no UI path to
+its rows at all, and no way to get data out of the app for analysis. Avi
+flagged both directly. The underlying data was never actually gated on
+live/departed status (`aircraft_event_log` is keyed by icao only, purged
+on the same 7-day loop as everything else) — the gap was UI reach, not
+retention.
+
+Fix, not a new view: `HistoryScreen.kt` — the screen Avi already lands on
+once an aircraft has departed — gets a third top-row button, "Share log",
+next to the existing "Share"/"Clear". Always enabled, unlike the other two
+(not gated on `entries.isNotEmpty()`), since the event log is a separate
+table from `aircraft_seen` and can have data even when History is empty.
+Exports the **entire** table across every icao ever logged, live or
+departed, not filtered to one aircraft — Avi's ask was "so we can analyze
+them," which wants the full dataset in one file, not a per-aircraft
+walk.
+
+New `CsvExporter.exportEventLog()` (same file-under-external-storage +
+share-sheet pattern as the pre-existing `exportHistory`/`exportAircraftSeen`),
+backed by a new `AircraftEventLogDao.getAll()` query (`ORDER BY timestampMs
+DESC`) and `PipelineService.exportEventLogCsv()`, mirroring
+`exportHistoryCsv()` exactly. `MainActivity`'s `shareCsv()` helper gained an
+optional `chooserTitle` param (was hardcoded "Share history") so the two
+exports get distinct share-sheet titles instead of both saying "Share
+history."
+
+No new History-detail-per-aircraft UI was built — that would have been the
+alternative fix (tap a departed aircraft, see its own log inline) but is a
+substantially bigger change (a whole new detail sheet for non-live
+aircraft) for the same practical outcome Avi asked for: get the data out
+where it can be read. Worth revisiting if per-aircraft in-app browsing
+after departure turns out to matter more than the CSV round-trip.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass, `:app:assembleDebug`
+passes. Version bumped to v2.0.5 (`versionCode` 37), debug APK built and
+added to `dist/`. Not verified on-device — Avi should confirm the "Share
+log" button in History produces a CSV with rows for aircraft no longer
+live.
