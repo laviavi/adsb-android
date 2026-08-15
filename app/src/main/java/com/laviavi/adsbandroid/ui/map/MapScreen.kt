@@ -130,6 +130,11 @@ fun MapScreen(
         mapView.getMapAsync { m ->
             map = m
             m.uiSettings.isCompassEnabled = false
+            // MapLibre's own logo is pure branding with no license requirement behind
+            // it (unlike Mapbox's paid SDK, which contractually mandates showing
+            // theirs) — safe to drop. The attribution text below it stays: that's the
+            // legally required OpenStreetMap/OpenFreeMap data credit, not a watermark.
+            m.uiSettings.isLogoEnabled = false
             m.uiSettings.setAttributionMargins(8, 0, 0, 8)
             m.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
                 .target(observer)

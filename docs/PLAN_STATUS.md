@@ -2516,3 +2516,13 @@ v2.0.2 (`versionCode` 34), debug APK built and added to `dist/`.
 If this app is ever built for a different device (an x86 emulator, an
 older 32-bit phone), the `abiFilters` line needs the matching ABI added or
 removed — this is a hard filter, not a fallback.
+
+## 48. Removed the MapLibre logo, kept OSM attribution (2026-08-14, v2.0.3)
+
+`MapScreen.kt`: `m.uiSettings.isLogoEnabled = false`, confirmed via `javap`
+against the real AAR (`UiSettings.setLogoEnabled`/`setAttributionEnabled`
+are separate toggles). Deliberately left attribution on — that's not
+MapLibre branding, it's the OpenStreetMap/OpenFreeMap data license's
+required credit (ODbL), a legal question distinct from a cosmetic logo,
+and wasn't asked to be removed. `:app:testDebugUnitTest` passes. Version
+bumped to v2.0.3 (`versionCode` 35), debug APK built and added to `dist/`.
