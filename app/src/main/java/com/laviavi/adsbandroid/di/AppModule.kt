@@ -11,6 +11,8 @@ import com.laviavi.adsbandroid.data.AircraftVisitDao
 import com.laviavi.adsbandroid.data.BestRangeDao
 import com.laviavi.adsbandroid.data.CoverageSampleDao
 import com.laviavi.adsbandroid.data.EnrichmentCacheDao
+import com.laviavi.adsbandroid.data.GlobalAircraftDao
+import com.laviavi.adsbandroid.data.GlobalAircraftImportDao
 import com.laviavi.adsbandroid.data.MIGRATION_1_2
 import com.laviavi.adsbandroid.data.MIGRATION_2_3
 import com.laviavi.adsbandroid.data.MIGRATION_3_4
@@ -18,6 +20,7 @@ import com.laviavi.adsbandroid.data.MIGRATION_4_5
 import com.laviavi.adsbandroid.data.MIGRATION_5_6
 import com.laviavi.adsbandroid.data.MIGRATION_6_7
 import com.laviavi.adsbandroid.data.MIGRATION_7_8
+import com.laviavi.adsbandroid.data.MIGRATION_8_9
 import com.laviavi.adsbandroid.offline.AndroidLocationNamer
 import com.laviavi.adsbandroid.offline.AndroidNetworkEligibility
 import com.laviavi.adsbandroid.offline.LocationNamer
@@ -40,7 +43,7 @@ object AppModule {
         AppConfigStore(ctx)
     @Provides @Singleton fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
         Room.databaseBuilder(ctx, AppDatabase::class.java, "adsb.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
             // Only a genuine downgrade (e.g. switching to an older debug build)
             // falls back to a wipe now — every historical upgrade path (v1-v3)
             // is covered by an explicit migration above.
@@ -54,6 +57,8 @@ object AppModule {
     @Provides fun provideBestRangeDao(db: AppDatabase): BestRangeDao = db.bestRangeDao()
     @Provides fun provideAircraftVisitDao(db: AppDatabase): AircraftVisitDao = db.aircraftVisitDao()
     @Provides fun provideAircraftEventLogDao(db: AppDatabase): AircraftEventLogDao = db.aircraftEventLogDao()
+    @Provides fun provideGlobalAircraftDao(db: AppDatabase): GlobalAircraftDao = db.globalAircraftDao()
+    @Provides fun provideGlobalAircraftImportDao(db: AppDatabase): GlobalAircraftImportDao = db.globalAircraftImportDao()
 
     // ── Offline maps ──────────────────────────────────────────────────────────
 

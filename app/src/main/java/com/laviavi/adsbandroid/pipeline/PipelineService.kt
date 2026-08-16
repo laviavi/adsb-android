@@ -32,7 +32,6 @@ import com.laviavi.adsbandroid.data.BestRangeRecordEntity
 import com.laviavi.adsbandroid.data.CoverageSampleEntity
 import com.laviavi.adsbandroid.data.EnrichmentCacheDao
 import com.laviavi.adsbandroid.data.FlightAwareEnrichment
-import com.laviavi.adsbandroid.data.IcaoLookup
 import com.laviavi.adsbandroid.data.typeDisplay
 import com.laviavi.adsbandroid.data.RouteEnrichment
 import com.laviavi.adsbandroid.enrich.Airlines
@@ -77,6 +76,9 @@ class PipelineService : Service() {
     @Inject lateinit var enrichmentDao: EnrichmentCacheDao
     @Inject lateinit var aircraftMetaCacheDao: AircraftMetaCacheDao
     @Inject lateinit var eventLogDao: com.laviavi.adsbandroid.data.AircraftEventLogDao
+    @Inject lateinit var globalAircraftDao: com.laviavi.adsbandroid.data.GlobalAircraftDao
+    @Inject lateinit var globalAircraftImportDao: com.laviavi.adsbandroid.data.GlobalAircraftImportDao
+    @Inject lateinit var networkEligibility: com.laviavi.adsbandroid.offline.NetworkEligibility
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
@@ -109,7 +111,10 @@ class PipelineService : Service() {
     // recordDeparted() once the "live aircraft missing from History" cause is found.
     private val historyDebugLogger by lazy { HistoryDebugLogger(applicationContext) }
     private val routeEnrichment by lazy { RouteEnrichment(enrichmentDao, eventLogDao) }
-    private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao, eventLogDao) }
+    private val globalAircraftDb by lazy {
+        com.laviavi.adsbandroid.data.GlobalAircraftDb(globalAircraftDao, globalAircraftImportDao)
+    }
+    private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao, eventLogDao, globalAircraftDb) }
     private val flightAwareEnrichment by lazy { FlightAwareEnrichment(serviceScope, eventLogDao) }
     // ConcurrentHashMap-backed, not a plain HashSet: add() runs on
     // ReceiverRepository's confined dispatcher (onAircraftUpdated), remove()
@@ -362,9 +367,6 @@ class PipelineService : Service() {
             this, NOTIFICATION_ID, buildNotification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
         UsbHotplugReceiver.register(this, hotplugReceiver)
-        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            receiverRepository.setLookup(IcaoLookup.load(applicationContext))
-        }
         receiverRepository.setDecoder(decoder)
         receiverRepository.start()
         applyDemodTuning()
@@ -375,6 +377,18 @@ class PipelineService : Service() {
                 runCatching { historyDao.purgeOlderThan(cutoff) }
                 runCatching { seenDao.purgeOlderThan(cutoff) }
                 runCatching { eventLogDao.purgeOlderThan(cutoff) }
+            }
+        }
+        // Global aircraft DB: checked immediately on start (a cheap HEAD request if
+        // already current), then weekly — Wi-Fi-gated the same way offline map
+        // downloads are, since a full re-import is ~14MB. See GlobalAircraftDb's
+        // own doc comment for why this replaces most per-aircraft network lookups.
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            while (true) {
+                if (networkEligibility.check().isEligible) {
+                    runCatching { globalAircraftDb.refreshIfNeeded() }
+                }
+                kotlinx.coroutines.delay(7 * 24 * 3_600_000L)
             }
         }
         // TEMP DEBUG: history investigation — delete this whole launch block once the
@@ -595,6 +609,7 @@ class PipelineService : Service() {
                 runCatching { routeEnrichment.close() }
                 runCatching { aircraftMetaEnrichment.close() }
                 runCatching { flightAwareEnrichment.close() }
+                runCatching { globalAircraftDb.close() }
             }
         }
     }

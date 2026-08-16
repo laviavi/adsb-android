@@ -58,6 +58,10 @@ data class AircraftMeta(
 fun AircraftMeta.isEmpty() =
     registration == null && manufacturer == null && model == null && typeCode == null && owner == null
 
+/** Every field present — the only case where the local global-aircraft mirror alone is enough to skip network entirely. */
+internal fun AircraftMeta.isComplete() =
+    registration != null && manufacturer != null && model != null && typeCode != null && owner != null
+
 fun AircraftMeta.typeDisplay(): String? {
     val fromMap = typeCode?.let { IcaoTypeNames.TYPE_MAP[it.uppercase()] }
     return when {
@@ -130,10 +134,12 @@ internal fun parseAdsbdbAircraft(icao: String, json: String): AircraftMeta? {
 }
 
 /**
- * Combines results from every source queried for one ICAO: first non-null
- * value per field wins, in the sources' priority order (hexdb > adsbdb) — a
- * partial result from one source no longer hides a field only a later
- * source had. Pure so it's directly testable without a network call.
+ * Combines results from every source consulted for one ICAO: first non-null
+ * value per field wins, in the order passed by the caller (`lookup()` passes the
+ * local global-DB mirror first, then network — a local value always wins over a
+ * network one for the same field) — a partial result from one source no longer
+ * hides a field only a later source had. Pure so it's directly testable without
+ * a network call.
  */
 internal fun mergeSources(icao: String, vararg results: AircraftMeta?): AircraftMeta? {
     val present = results.filterNotNull()
@@ -150,15 +156,18 @@ internal fun mergeSources(icao: String, vararg results: AircraftMeta?): Aircraft
 }
 
 /**
- * Per-ICAO metadata from public APIs: hexdb.io + adsbdb, merged field-by-field.
- * OpenSky's metadata endpoint was dropped — confirmed permanently gone (410
- * Gone) every time it's been checked this session, and every attempt only
- * added log noise for zero signal.
+ * Per-ICAO metadata: the local [GlobalAircraftDb] mirror first (offline, instant),
+ * hexdb.io/adsbdb only for whatever field that mirror doesn't have. Network sources
+ * are the fallback now, not the default — most aircraft resolve without a request.
+ * OpenSky's metadata endpoint was dropped — confirmed permanently gone (410 Gone)
+ * every time it's been checked this session, and every attempt only added log
+ * noise for zero signal.
  * Mirrors Python aircraft_meta.py lookup().
  */
 class AircraftMetaEnrichment(
     private val cacheDao: AircraftMetaCacheDao,
     private val eventLogDao: AircraftEventLogDao,
+    private val globalDb: GlobalAircraftDb,
 ) {
     private val client = HttpClient(CIO) {
         engine { requestTimeout = 8_000 }
@@ -186,7 +195,13 @@ class AircraftMetaEnrichment(
             return result
         }
 
-        val meta = if (key.startsWith("A")) lookupUs(key) else lookupIntl(key)
+        val local = globalDb.lookup(key)
+        val meta = if (local != null && local.isComplete()) {
+            local
+        } else {
+            val network = if (key.startsWith("A")) lookupUs(key) else lookupIntl(key)
+            mergeSources(key, local, network)
+        }
         val now = System.currentTimeMillis()
         cacheDao.insert(
             AircraftMetaCacheEntity(

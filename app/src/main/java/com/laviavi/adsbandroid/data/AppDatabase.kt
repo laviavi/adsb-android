@@ -230,6 +230,51 @@ data class AircraftEventLogEntity(
     suspend fun purgeOlderThan(cutoffMs: Long)
 }
 
+/**
+ * One row per aircraft in ADS-B Exchange's `basic-ac-db.json.gz` — a global, daily-
+ * updated mirror downloaded and imported wholesale (see `GlobalAircraftDb`), not a
+ * per-lookup cache. Checked before any network meta source; hexdb/adsbdb only fill
+ * whatever field this table doesn't have. No write-back: a field a network source
+ * fills in is never saved here, only into the existing 2h `aircraft_meta_cache`.
+ */
+@Entity(tableName = "global_aircraft")
+data class GlobalAircraftEntity(
+    @PrimaryKey val icao: String,
+    val registration: String?,
+    val typeCode: String?,
+    val manufacturer: String?,
+    val model: String?,
+    val owner: String?,
+    val military: Boolean,
+)
+
+@Dao interface GlobalAircraftDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entities: List<GlobalAircraftEntity>)
+    @Query("SELECT * FROM global_aircraft WHERE icao = :icao")
+    suspend fun get(icao: String): GlobalAircraftEntity?
+    @Query("DELETE FROM global_aircraft")
+    suspend fun clear()
+    @Query("SELECT COUNT(*) FROM global_aircraft")
+    suspend fun count(): Int
+}
+
+/** Singleton row (id always 0) recording the last successful import, so a refresh can skip re-downloading an unchanged file. */
+@Entity(tableName = "global_aircraft_import")
+data class GlobalAircraftImportEntity(
+    @PrimaryKey val id: Int = 0,
+    val remoteLastModified: String?,
+    val importedAtMs: Long,
+    val rowCount: Int,
+)
+
+@Dao interface GlobalAircraftImportDao {
+    @Query("SELECT * FROM global_aircraft_import WHERE id = 0")
+    suspend fun get(): GlobalAircraftImportEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: GlobalAircraftImportEntity)
+}
+
 @Database(
     entities = [
         AircraftHistoryEntity::class,
@@ -240,8 +285,10 @@ data class AircraftEventLogEntity(
         CoverageSampleEntity::class,
         BestRangeRecordEntity::class,
         AircraftEventLogEntity::class,
+        GlobalAircraftEntity::class,
+        GlobalAircraftImportEntity::class,
     ],
-    version = 8,
+    version = 9,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftHistoryDao(): AircraftHistoryDao
@@ -252,6 +299,37 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun coverageSampleDao(): CoverageSampleDao
     abstract fun bestRangeDao(): BestRangeDao
     abstract fun aircraftEventLogDao(): AircraftEventLogDao
+    abstract fun globalAircraftDao(): GlobalAircraftDao
+    abstract fun globalAircraftImportDao(): GlobalAircraftImportDao
+}
+
+/** v8 -> v9: added `global_aircraft` (ADS-B Exchange mirror) + `global_aircraft_import` (staleness tracking). */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `global_aircraft` (
+                `icao` TEXT NOT NULL PRIMARY KEY,
+                `registration` TEXT,
+                `typeCode` TEXT,
+                `manufacturer` TEXT,
+                `model` TEXT,
+                `owner` TEXT,
+                `military` INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `global_aircraft_import` (
+                `id` INTEGER NOT NULL PRIMARY KEY,
+                `remoteLastModified` TEXT,
+                `importedAtMs` INTEGER NOT NULL,
+                `rowCount` INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+    }
 }
 
 /** v7 -> v8: added `aircraft_event_log`, the per-aircraft detection/enrichment/departure audit trail. */

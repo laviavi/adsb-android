@@ -2874,3 +2874,82 @@ change and nothing else. `:app:assembleDebug` passes. Version bumped to
 v2.1.0 (`versionCode` 42, minor bump given the scope — this is a
 foundational build-config fix, not a source-level patch), debug APK built
 and added to `dist/`. Not verified on-device.
+
+## 55. Meta enrichment redesigned around a local global aircraft mirror (2026-08-16, v2.2.0)
+
+Avi asked "is there a global international aircraft db?" while reviewing a
+per-country-registry plan (Transport Canada CCARCS) that turned out to be
+unnecessary. Verified live: ADS-B Exchange publishes `basic-ac-db.json.gz`
+— 614,890 aircraft, updated daily, confirmed accurate against two real
+ICAOs this session had already independently verified (C04205 → C-FZAA
+Sikorsky S-76-A; C0809E → C-GWSJ Boeing 737 MAX 8, both exact matches).
+One file replaces the entire per-country plan.
+
+**New tables** (`AppDatabase.kt`, `MIGRATION_8_9`, version 8→9):
+- `global_aircraft` — one row per ICAO (`registration`, `typeCode`,
+  `manufacturer`, `model`, `owner`, `military`). A periodically-refreshed
+  full mirror, not the existing 2h per-lookup cache.
+- `global_aircraft_import` — singleton row tracking the last import's
+  remote `Last-Modified` + row count, so a refresh can skip re-downloading
+  an unchanged file.
+
+**New `GlobalAircraftDb.kt`**: HEAD request compares `Last-Modified`
+against the last import — skips the download entirely if unchanged. On an
+actual refresh: holds the response as compressed bytes only (~14MB),
+streams decompression and NDJSON parsing together (`GZIPInputStream` →
+`BufferedReader.lineSequence()`), batch-inserts 1,000 rows/transaction —
+the ~120MB decompressed text is never materialized in memory at once, only
+the current line and the current batch. `parseGlobalAcDbLine()` is a pure
+function, tested directly against real captured lines
+(`GlobalAircraftDbTests.kt`) rather than through the network path.
+
+**Lookup order flips** (`AircraftMetaEnrichment.lookup()`): algorithmic
+(US, unchanged) → **local mirror (new, offline, instant)** → hexdb/adsbdb
+(network, only if the mirror is missing a field via the new
+`AircraftMeta.isComplete()` check) → cached negative as before. Network
+meta lookups go from "always queried" to "last resort" — the common case
+(mirror has every field) now makes zero network calls where it always
+made at least one before. `mergeSources()` is reused unchanged for the
+merge — mirror passed first in the vararg list, so a local value always
+wins over a network one for the same field, matching how the function
+already worked.
+
+**Explicit non-choices, per Avi's direction:**
+- **No write-back.** A field hexdb/adsbdb fills in beyond what the mirror
+  has (e.g. a null owner — genuinely common in the source data, confirmed
+  by inspection) is cached only in the existing 2h `aircraft_meta_cache`,
+  never saved into `global_aircraft`. That gap gets re-fetched from
+  hexdb/adsbdb every 2h until the next weekly refresh happens to fill it
+  — an accepted, explicit cost, not an oversight.
+  FlightAware/route enrichment are untouched — the mirror carries no
+  route data at all, so both mechanisms are exactly as they were.
+
+**Retired**: `IcaoLookup.kt` + `icao_db.json` (the old 20-entry bundled-DB
+placeholder, dead weight since it was created, fully superseded).
+`AircraftManager`'s separate `lookup`/`setLookup`/`IcaoEntry` mechanism in
+`:core:receiver` is now dead code (nothing calls `setLookup` any more) —
+deliberately left in place rather than removed in the same change, since
+touching that module's tests wasn't part of what Avi reviewed for this
+plan; flagged here as a real follow-up, not forgotten.
+
+**Refresh trigger**: `PipelineService.onCreate()` — checked immediately on
+start (a cheap HEAD request most of the time) then every 7 days,
+Wi-Fi-gated via the same `NetworkEligibility`/`OfflineDownloadPolicy` this
+app already uses for offline map downloads (unmetered Wi-Fi only).
+
+**Licensing, not fully resolved, flagged to Avi before building**: ADS-B
+Exchange's general Terms of Use (now under JETNET, an apparent
+acquisition) restrict redistributing "data acquired from the Services,"
+but never actually mention this specific free sample file. This app is
+personal and side-loaded, never published or sold — a materially
+lower-risk read than redistributing it as a product, but not a guaranteed-
+clear one either.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass (`AppDatabase
+MigrationTests` needed `MIGRATION_8_9` added to its 4 fixture builders,
+same class of gap as `MIGRATION_7_8` before it — same fix), `:app:assembleDebug`
+passes. Version bumped to v2.2.0 (`versionCode` 43, +0.1 per Avi's
+instruction), debug APK built and added to `dist/`. Not verified on-device
+— first real run needs Wi-Fi to complete the initial ~14MB import before
+the local-mirror-hit path has anything to answer from; worth confirming
+the enrichment log shows `global-db` as a source afterward.
