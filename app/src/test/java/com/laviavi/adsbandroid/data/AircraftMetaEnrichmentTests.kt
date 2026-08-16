@@ -1,5 +1,6 @@
 package com.laviavi.adsbandroid.data
 
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -180,5 +181,56 @@ class MergeSourcesTests {
     @Test fun `every source empty (all fields null) still yields no result`() {
         val empty = AircraftMeta("C084A3", null, null, null, null, null, "hexdb")
         assertNull(mergeSources("C084A3", empty, null))
+    }
+}
+
+/**
+ * Regression coverage for the actual bug: `mapHexdbResponse`/`mapAdsbdbFields` were always
+ * correct and tested (above), but the app's real fetch path used Ktor's typed `.body<T>()`
+ * deserialization, which threw "Serializer for class X is not found" on every real request —
+ * confirmed via a live device export (ICAO C04205) showing two independent fresh (non-cached)
+ * failures over 4 hours apart for an aircraft both hexdb.io and adsbdb definitely have data
+ * for (verified live with curl). These tests exercise the actual decode step
+ * (`metaJson.decodeFromString<T>()`, the fix) against real captured API responses — the class
+ * of bug the pure-mapping-function tests above could never catch, since they never touch
+ * deserialization at all.
+ */
+class MetaJsonDecodeTests {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    @Test fun `hexdb C04205 (Helijet Sikorsky S-76A) decodes and maps correctly`() {
+        // Captured live: hexdb.io/api/v1/aircraft/c04205.
+        val raw = """{"ModeS": "C04205", "Registration": "C-FZAA", "Manufacturer": "Sikorsky",
+            "ICAOTypeCode": "S76", "Type": "S-76 A", "RegisteredOwners": "Helijet", "OperatorFlagCode": "JBA"}"""
+        val resp = json.decodeFromString<HexdbResponse>(raw)
+        val meta = mapHexdbResponse("C04205", resp)
+        assertNotNull(meta)
+        assertEquals("C-FZAA", meta!!.registration)
+        assertEquals("Sikorsky", meta.manufacturer)
+        assertEquals("S76", meta.typeCode)
+        assertEquals("Helijet", meta.owner)
+    }
+
+    @Test fun `adsbdb C04205 parses through the nested response-aircraft object correctly`() {
+        // Captured live: api.adsbdb.com/v0/aircraft/c04205.
+        val raw = """{"response":{"aircraft":{"type":"S-76 A","icao_type":"S76","manufacturer":"Sikorsky",
+            "mode_s":"C04205","registration":"C-FZAA","registered_owner_country_iso_name":"CA",
+            "registered_owner_country_name":"Canada","registered_owner_operator_flag_code":"JBA",
+            "registered_owner":"Helijet","url_photo":null,"url_photo_thumbnail":null}}}"""
+        val meta = parseAdsbdbAircraft("C04205", raw)
+        assertNotNull(meta)
+        assertEquals("C-FZAA", meta!!.registration)
+        assertEquals("S76", meta.typeCode)
+        assertEquals("Sikorsky", meta.manufacturer)
+    }
+
+    @Test fun `adsbdb unknown-aircraft response (string, not object) is no data, not a crash`() {
+        // Captured live: api.adsbdb.com/v0/aircraft/cf3bf5 -- same string-response shape as the
+        // callsign endpoint's "unknown callsign" case, now handled the same defensive way.
+        assertNull(parseAdsbdbAircraft("CF3BF5", """{"response":"unknown aircraft"}"""))
+    }
+
+    @Test fun `malformed JSON is no data, not a crash`() {
+        assertNull(parseAdsbdbAircraft("C04205", "not json at all"))
     }
 }

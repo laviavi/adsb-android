@@ -3,20 +3,32 @@ package com.laviavi.adsbandroid.data
 import android.util.Log
 import com.laviavi.adsbandroid.enrich.IcaoTypeNames
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 
 private const val TAG = "AircraftMetaEnrich"
+
+/**
+ * Ktor's typed `.body<T>()` deserialization (via ContentNegotiation) is broken for this
+ * app on Android — confirmed via a real exported enrichment log: hexdb.io and adsbdb both
+ * threw "Serializer for class X is not found" on every real fetch despite both returning
+ * correctly-shaped JSON (verified live with curl), and OpenSky's own failure explicitly said
+ * "(Kotlin reflection is not available)". [RouteEnrichment] and [FlightAwareEnrichment] never
+ * hit this because they already fetch raw text and parse manually — this bypasses Ktor's
+ * converter the same way, decoding straight from the response body via kotlinx-serialization.
+ */
+private val metaJson = Json { ignoreUnknownKeys = true }
 
 /**
  * Was 30 days. A negative result (all three sources returned nothing — a
@@ -79,22 +91,8 @@ internal fun mapHexdbResponse(icao: String, resp: HexdbResponse): AircraftMeta? 
     return AircraftMeta(icao, reg, mfr, mdl, tc, own, "hexdb")
 }
 
-// ── OpenSky response ──────────────────────────────────────────────────────────
-
-@Serializable
-private data class OpenSkyResponse(
-    val registration: String?      = null,
-    val manufacturername: String?  = null,
-    val model: String?             = null,
-    val typecode: String?          = null,
-)
-
 // ── adsbdb aircraft response ──────────────────────────────────────────────────
 
-@Serializable
-private data class AdsbdbAircraftResponse(val response: AdsbdbAircraftBody? = null)
-@Serializable
-private data class AdsbdbAircraftBody(val aircraft: AdsbdbAircraftFields? = null)
 @Serializable
 internal data class AdsbdbAircraftFields(
     val registration: String?  = null,
@@ -120,10 +118,22 @@ internal fun mapAdsbdbFields(icao: String, ac: AdsbdbAircraftFields): AircraftMe
 }
 
 /**
+ * adsbdb's "response" field is an OBJECT (`{"aircraft": {...}}`) for a recognized ICAO but a
+ * plain STRING ("unknown aircraft") for one it isn't — the same shape mismatch already found
+ * and fixed for the callsign/route endpoint. Parsed as raw JsonElement so a string response is
+ * just "no data" instead of throwing.
+ */
+internal fun parseAdsbdbAircraft(icao: String, json: String): AircraftMeta? {
+    val root = runCatching { metaJson.parseToJsonElement(json).jsonObject }.getOrNull() ?: return null
+    val aircraft = (root["response"] as? JsonObject)?.get("aircraft") as? JsonObject ?: return null
+    return mapAdsbdbFields(icao, metaJson.decodeFromJsonElement<AdsbdbAircraftFields>(aircraft))
+}
+
+/**
  * Combines results from every source queried for one ICAO: first non-null
- * value per field wins, in the sources' priority order (hexdb > OpenSky >
- * adsbdb) — a partial result from one source no longer hides a field only a
- * later source had. Pure so it's directly testable without a network call.
+ * value per field wins, in the sources' priority order (hexdb > adsbdb) — a
+ * partial result from one source no longer hides a field only a later
+ * source had. Pure so it's directly testable without a network call.
  */
 internal fun mergeSources(icao: String, vararg results: AircraftMeta?): AircraftMeta? {
     val present = results.filterNotNull()
@@ -140,9 +150,10 @@ internal fun mergeSources(icao: String, vararg results: AircraftMeta?): Aircraft
 }
 
 /**
- * Per-ICAO metadata from three public APIs: hexdb.io → OpenSky → adsbdb.
- * For US aircraft (ICAO prefix A), FAA local CSV is tried first.
- * Results cached in Room for 30 days.
+ * Per-ICAO metadata from public APIs: hexdb.io + adsbdb, merged field-by-field.
+ * OpenSky's metadata endpoint was dropped — confirmed permanently gone (410
+ * Gone) every time it's been checked this session, and every attempt only
+ * added log noise for zero signal.
  * Mirrors Python aircraft_meta.py lookup().
  */
 class AircraftMetaEnrichment(
@@ -150,9 +161,6 @@ class AircraftMetaEnrichment(
     private val eventLogDao: AircraftEventLogDao,
 ) {
     private val client = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true })
-        }
         engine { requestTimeout = 8_000 }
     }
 
@@ -198,52 +206,28 @@ class AircraftMetaEnrichment(
     /** Releases the underlying HTTP engine's connection pool/threads. */
     fun close() = client.close()
 
-    // US: hexdb.io + OpenSky, queried in parallel and merged field-by-field —
-    // one source having a registration doesn't mean it also has the owner.
-    private suspend fun lookupUs(icao: String): AircraftMeta? = coroutineScope {
-        val hexdb = async { fetchHexdb(icao) }
-        val opensky = async { fetchOpenSky(icao) }
-        mergeSources(icao, hexdb.await(), opensky.await())
-    }
+    // US aircraft only have hexdb.io to check now that OpenSky's gone.
+    private suspend fun lookupUs(icao: String): AircraftMeta? = fetchHexdb(icao)
 
-    // Non-US: hexdb.io + OpenSky + adsbdb, same parallel-merge approach.
+    // Non-US: hexdb.io + adsbdb, queried in parallel and merged field-by-field —
+    // one source having a registration doesn't mean it also has the owner.
     private suspend fun lookupIntl(icao: String): AircraftMeta? = coroutineScope {
         val hexdb = async { fetchHexdb(icao) }
-        val opensky = async { fetchOpenSky(icao) }
         val adsbdb = async { fetchAdsbdb(icao) }
-        mergeSources(icao, hexdb.await(), opensky.await(), adsbdb.await())
+        mergeSources(icao, hexdb.await(), adsbdb.await())
     }
 
     private suspend fun fetchHexdb(icao: String): AircraftMeta? {
         val url = "https://hexdb.io/api/v1/aircraft/${icao.lowercase()}"
         val startedAt = System.currentTimeMillis()
         val outcome = runCatching {
-            val resp: HexdbResponse = client.get(url) {
+            val text = client.get(url) {
                 headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
-            }.body()
-            mapHexdbResponse(icao, resp)
+            }.bodyAsText()
+            mapHexdbResponse(icao, metaJson.decodeFromString<HexdbResponse>(text))
         }
         outcome.exceptionOrNull()?.let { Log.d(TAG, "hexdb.io error for $icao: $it") }
         logAttempt(icao, "hexdb", false, url, outcome, System.currentTimeMillis() - startedAt)
-        return outcome.getOrNull()
-    }
-
-    private suspend fun fetchOpenSky(icao: String): AircraftMeta? {
-        val url = "https://opensky-network.org/api/metadata/aircraft/icao/${icao.lowercase()}"
-        val startedAt = System.currentTimeMillis()
-        val outcome = runCatching {
-            val resp: OpenSkyResponse = client.get(url) {
-                headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
-            }.body()
-            val reg  = resp.registration.present()
-            val mfr  = resp.manufacturername.present()
-            val mdl  = resp.model.present()
-            val tc   = resp.typecode.present()?.uppercase()
-            if (reg == null && mfr == null && mdl == null) return@runCatching null
-            AircraftMeta(icao, reg, mfr, mdl, tc, null, "opensky")
-        }
-        outcome.exceptionOrNull()?.let { Log.d(TAG, "OpenSky error for $icao: $it") }
-        logAttempt(icao, "opensky", false, url, outcome, System.currentTimeMillis() - startedAt)
         return outcome.getOrNull()
     }
 
@@ -251,10 +235,10 @@ class AircraftMetaEnrichment(
         val url = "https://api.adsbdb.com/v0/aircraft/${icao.lowercase()}"
         val startedAt = System.currentTimeMillis()
         val outcome = runCatching {
-            val resp: AdsbdbAircraftResponse = client.get(url) {
+            val text = client.get(url) {
                 headers { append(HttpHeaders.UserAgent, "adsb-receiver/1.0 (open source)") }
-            }.body()
-            resp.response?.aircraft?.let { mapAdsbdbFields(icao, it) }
+            }.bodyAsText()
+            parseAdsbdbAircraft(icao, text)
         }
         outcome.exceptionOrNull()?.let { Log.d(TAG, "adsbdb error for $icao: $it") }
         logAttempt(icao, "adsbdb-aircraft", false, url, outcome, System.currentTimeMillis() - startedAt)

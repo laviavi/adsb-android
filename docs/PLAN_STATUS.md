@@ -2826,3 +2826,51 @@ added to `dist/`. Not verified on-device. Next real repro of a meta-source
 "no data" row should now show the actual exception — worth pulling the
 enrichment log again after this is installed to see if C04205 (or a
 similar case) recurs with a real error message this time.
+
+## 54. Root cause found: the kotlinx-serialization Gradle plugin was never applied to `:app` (2026-08-15, v2.1.0)
+
+§53's error-detail capture worked exactly as intended — a fresh export
+(ICAO C0809E) showed the real exception for the first time:
+`SerializationException: Serializer for class 'HexdbResponse' is not
+found`, identically for `AdsbdbAircraftResponse`, plus OpenSky's own
+failure explicitly saying `(Kotlin reflection is not available)`. That's
+the exact same message the route-lookup bug threw (§51) — meaning that
+fix's diagnosis ("adsbdb's response field is sometimes a string") was
+correct for *that* symptom but incomplete as a root cause, since hexdb.io
+never has that ambiguity and failed identically.
+
+Wrote a JVM unit test (`MetaJsonDecodeTests`) decoding real captured JSON
+directly via `Json.decodeFromString<HexdbResponse>()` — no Ktor, no
+Android, no reflection-availability question at all — and it threw the
+*identical* error in a plain JVM test. That ruled out "Android lacks
+kotlin-reflect" (this session's working theory since §51) entirely and
+pointed at the build itself. Checked `app/build.gradle.kts`'s `plugins {}`
+block: `kotlin-serialization` is defined in `libs.versions.toml` and
+`:core:receiver` already applies it correctly — `:app` never did, despite
+depending on `kotlinx-serialization-json` directly. Without the compiler
+plugin, `@Serializable` annotations are inert — no `$serializer` ever gets
+generated for any class in the module — so no typed decode of a
+locally-defined data class could ever have worked, via Ktor's
+`ContentNegotiation` or direct `Json.decodeFromString`, anywhere in
+`:app`, on any platform, ever. §51's route fix and this session's earlier
+hexdb/adsbdb fixes worked only because they route around typed decode
+entirely (raw `JsonElement` navigation) — treating the symptom correctly
+without ever finding this.
+
+Fix: `alias(libs.plugins.kotlin.serialization)` added to both
+`build.gradle.kts` (root, `apply false`) and `app/build.gradle.kts`
+(applied), matching how `:core:receiver` already had it. Kept the
+JsonElement-based parsing in `RouteEnrichment`/`AircraftMetaEnrichment` as
+the permanent approach where adsbdb's response field is genuinely
+polymorphic (string-or-object) — a fixed `@Serializable` shape can't
+represent that regardless of whether the plugin runs — but confirmed via
+the now-passing `MetaJsonDecodeTests` that typed decode (`hexdb`'s plain
+`decodeFromString<HexdbResponse>()`) now actually works, which it never
+did before this fix, in this app, at all.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass — 107 app tests, 0
+failures, including `MetaJsonDecodeTests` which failed before this exact
+change and nothing else. `:app:assembleDebug` passes. Version bumped to
+v2.1.0 (`versionCode` 42, minor bump given the scope — this is a
+foundational build-config fix, not a source-level patch), debug APK built
+and added to `dist/`. Not verified on-device.
