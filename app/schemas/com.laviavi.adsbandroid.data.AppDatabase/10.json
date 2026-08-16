@@ -1,0 +1,691 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 10,
+    "identityHash": "6f96c56850f19edf2fed53b86ba9a067",
+    "entities": [
+      {
+        "tableName": "aircraft_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `icao` TEXT NOT NULL, `callsign` TEXT, `altitudeFt` INTEGER, `latitudeDeg` REAL, `longitudeDeg` REAL, `groundSpeedKt` INTEGER, `trackDeg` INTEGER, `timestampMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "callsign",
+            "columnName": "callsign",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "altitudeFt",
+            "columnName": "altitudeFt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latitudeDeg",
+            "columnName": "latitudeDeg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "longitudeDeg",
+            "columnName": "longitudeDeg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "groundSpeedKt",
+            "columnName": "groundSpeedKt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "trackDeg",
+            "columnName": "trackDeg",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "aircraft_seen",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`icao` TEXT NOT NULL, `callsign` TEXT, `registration` TEXT, `operator` TEXT, `aircraftType` TEXT, `route` TEXT, `altitudeFt` INTEGER, `groundSpeedKt` INTEGER, `trackDeg` INTEGER, `latitudeDeg` REAL, `longitudeDeg` REAL, `distanceNm` REAL, `squawk` TEXT, `messageCount` INTEGER NOT NULL, `firstSeenMs` INTEGER NOT NULL, `lastSeenMs` INTEGER NOT NULL, PRIMARY KEY(`icao`))",
+        "fields": [
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "callsign",
+            "columnName": "callsign",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "registration",
+            "columnName": "registration",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "operator",
+            "columnName": "operator",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "aircraftType",
+            "columnName": "aircraftType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "route",
+            "columnName": "route",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "altitudeFt",
+            "columnName": "altitudeFt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "groundSpeedKt",
+            "columnName": "groundSpeedKt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "trackDeg",
+            "columnName": "trackDeg",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latitudeDeg",
+            "columnName": "latitudeDeg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "longitudeDeg",
+            "columnName": "longitudeDeg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "distanceNm",
+            "columnName": "distanceNm",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "squawk",
+            "columnName": "squawk",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "messageCount",
+            "columnName": "messageCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeenMs",
+            "columnName": "firstSeenMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenMs",
+            "columnName": "lastSeenMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "icao"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "enrichment_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `route` TEXT, `origin` TEXT, `destination` TEXT, `cachedAtMs` INTEGER NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "route",
+            "columnName": "route",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "destination",
+            "columnName": "destination",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "cachedAtMs",
+            "columnName": "cachedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "aircraft_meta_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`icao` TEXT NOT NULL, `registration` TEXT, `manufacturer` TEXT, `model` TEXT, `typeCode` TEXT, `owner` TEXT, `source` TEXT NOT NULL, `cachedAtMs` INTEGER NOT NULL, PRIMARY KEY(`icao`))",
+        "fields": [
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registration",
+            "columnName": "registration",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "manufacturer",
+            "columnName": "manufacturer",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "model",
+            "columnName": "model",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "typeCode",
+            "columnName": "typeCode",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "owner",
+            "columnName": "owner",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAtMs",
+            "columnName": "cachedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "icao"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "aircraft_visits",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `icao` TEXT NOT NULL, `registration` TEXT, `operator` TEXT, `aircraftType` TEXT, `isAirline` INTEGER NOT NULL, `firstSeenMs` INTEGER NOT NULL, `lastSeenMs` INTEGER NOT NULL, `messageCount` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registration",
+            "columnName": "registration",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "operator",
+            "columnName": "operator",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "aircraftType",
+            "columnName": "aircraftType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isAirline",
+            "columnName": "isAirline",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeenMs",
+            "columnName": "firstSeenMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenMs",
+            "columnName": "lastSeenMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageCount",
+            "columnName": "messageCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_aircraft_visits_icao",
+            "unique": false,
+            "columnNames": [
+              "icao"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aircraft_visits_icao` ON `${TABLE_NAME}` (`icao`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "coverage_samples",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestampMs` INTEGER NOT NULL, `sector` TEXT NOT NULL, `count` INTEGER NOT NULL, `maxMi` REAL NOT NULL, `medianSignalDbfs` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sector",
+            "columnName": "sector",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "count",
+            "columnName": "count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxMi",
+            "columnName": "maxMi",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "medianSignalDbfs",
+            "columnName": "medianSignalDbfs",
+            "affinity": "REAL",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_coverage_samples_sector",
+            "unique": false,
+            "columnNames": [
+              "sector"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_coverage_samples_sector` ON `${TABLE_NAME}` (`sector`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "best_range_record",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `icao` TEXT NOT NULL, `callsign` TEXT, `distanceNm` REAL NOT NULL, `bearingDeg` REAL NOT NULL, `altitudeFt` INTEGER, `timestampMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "callsign",
+            "columnName": "callsign",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "distanceNm",
+            "columnName": "distanceNm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bearingDeg",
+            "columnName": "bearingDeg",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "altitudeFt",
+            "columnName": "altitudeFt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "aircraft_event_log",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `icao` TEXT NOT NULL, `timestampMs` INTEGER NOT NULL, `eventType` TEXT NOT NULL, `source` TEXT, `requestKey` TEXT, `requestUrl` TEXT, `servedFromCache` INTEGER, `success` INTEGER, `resultSummary` TEXT, `durationMs` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "requestKey",
+            "columnName": "requestKey",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "requestUrl",
+            "columnName": "requestUrl",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "servedFromCache",
+            "columnName": "servedFromCache",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "success",
+            "columnName": "success",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "resultSummary",
+            "columnName": "resultSummary",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_aircraft_event_log_icao",
+            "unique": false,
+            "columnNames": [
+              "icao"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aircraft_event_log_icao` ON `${TABLE_NAME}` (`icao`)"
+          },
+          {
+            "name": "index_aircraft_event_log_timestampMs",
+            "unique": false,
+            "columnNames": [
+              "timestampMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_aircraft_event_log_timestampMs` ON `${TABLE_NAME}` (`timestampMs`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "global_aircraft",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`icao` TEXT NOT NULL, `registration` TEXT, `typeCode` TEXT, `manufacturer` TEXT, `model` TEXT, `owner` TEXT, `military` INTEGER NOT NULL, PRIMARY KEY(`icao`))",
+        "fields": [
+          {
+            "fieldPath": "icao",
+            "columnName": "icao",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "registration",
+            "columnName": "registration",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "typeCode",
+            "columnName": "typeCode",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "manufacturer",
+            "columnName": "manufacturer",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "model",
+            "columnName": "model",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "owner",
+            "columnName": "owner",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "military",
+            "columnName": "military",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "icao"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "global_aircraft_import",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `remoteLastModified` TEXT, `importedAtMs` INTEGER NOT NULL, `rowCount` INTEGER NOT NULL, `errorMessage` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteLastModified",
+            "columnName": "remoteLastModified",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "importedAtMs",
+            "columnName": "importedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rowCount",
+            "columnName": "rowCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "errorMessage",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6f96c56850f19edf2fed53b86ba9a067')"
+    ]
+  }
+}

@@ -112,7 +112,7 @@ class PipelineService : Service() {
     private val historyDebugLogger by lazy { HistoryDebugLogger(applicationContext) }
     private val routeEnrichment by lazy { RouteEnrichment(enrichmentDao, eventLogDao) }
     private val globalAircraftDb by lazy {
-        com.laviavi.adsbandroid.data.GlobalAircraftDb(globalAircraftDao, globalAircraftImportDao)
+        com.laviavi.adsbandroid.data.GlobalAircraftDb(globalAircraftDao, globalAircraftImportDao, eventLogDao)
     }
     private val aircraftMetaEnrichment by lazy { AircraftMetaEnrichment(aircraftMetaCacheDao, eventLogDao, globalAircraftDb) }
     private val flightAwareEnrichment by lazy { FlightAwareEnrichment(serviceScope, eventLogDao) }
@@ -201,6 +201,25 @@ class PipelineService : Service() {
     /** User-triggered from the Live screen's overflow menu — zeroes session totals without a reconnect. */
     fun resetStatsCounters() {
         stats.reset()
+    }
+
+    /** History screen's "Check DB" button — a human-readable snapshot of the global aircraft mirror's state. */
+    fun checkGlobalDbStatus(onResult: (String) -> Unit) {
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val status = runCatching { globalAircraftDb.status() }.getOrNull()
+            val text = when {
+                status == null -> "Global aircraft DB: not downloaded yet (needs Wi-Fi)."
+                status.importedAtMs == 0L && status.errorMessage != null ->
+                    "Global aircraft DB: never successfully downloaded. Last attempt failed: ${status.errorMessage}"
+                else -> {
+                    val fmt = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.US)
+                    val age = fmt.format(java.util.Date(status.importedAtMs))
+                    val base = "Global aircraft DB: ${"%,d".format(status.rowCount)} aircraft, updated $age."
+                    if (status.errorMessage != null) "$base\nMost recent refresh attempt failed: ${status.errorMessage}" else base
+                }
+            }
+            onResult(text)
+        }
     }
 
     // TEMP DEBUG: history investigation — delete this method with the rest.

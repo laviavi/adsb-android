@@ -259,13 +259,20 @@ data class GlobalAircraftEntity(
     suspend fun count(): Int
 }
 
-/** Singleton row (id always 0) recording the last successful import, so a refresh can skip re-downloading an unchanged file. */
+/**
+ * Singleton row (id always 0) recording the last successful import, so a refresh
+ * can skip re-downloading an unchanged file. [errorMessage] is the *most recent
+ * attempt's* failure, if any — [importedAtMs]/[rowCount]/[remoteLastModified] stay
+ * from the last actual success, never cleared by a failed attempt, so a lookup
+ * always has the last-known-good data to work with even while an error is showing.
+ */
 @Entity(tableName = "global_aircraft_import")
 data class GlobalAircraftImportEntity(
     @PrimaryKey val id: Int = 0,
     val remoteLastModified: String?,
     val importedAtMs: Long,
     val rowCount: Int,
+    val errorMessage: String? = null,
 )
 
 @Dao interface GlobalAircraftImportDao {
@@ -288,7 +295,7 @@ data class GlobalAircraftImportEntity(
         GlobalAircraftEntity::class,
         GlobalAircraftImportEntity::class,
     ],
-    version = 9,
+    version = 10,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftHistoryDao(): AircraftHistoryDao
@@ -329,6 +336,13 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
             )
             """.trimIndent(),
         )
+    }
+}
+
+/** v9 -> v10: added `global_aircraft_import.errorMessage` — the last refresh attempt's failure, if any, surfaced for the History screen's "Check DB" status. */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `global_aircraft_import` ADD COLUMN `errorMessage` TEXT")
     }
 }
 

@@ -42,6 +42,7 @@ fun HistoryScreen(
     onShare: () -> Unit,
     onShareEventLog: () -> Unit,
     onShareHistoryDebug: () -> Unit, // TEMP DEBUG: history investigation — delete with the rest
+    onCheckGlobalDb: (onResult: (String) -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var filter by remember { mutableStateOf("") }
@@ -49,6 +50,7 @@ fun HistoryScreen(
     var groupBy by remember { mutableStateOf(HistoryGroupBy.NONE) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showGroupMenu by remember { mutableStateOf(false) }
+    var globalDbStatus by remember { mutableStateOf<String?>(null) }
 
     val filtered = remember(entries, filter) {
         if (filter.isBlank()) entries
@@ -97,10 +99,22 @@ fun HistoryScreen(
             TextButton(onClick = onShareEventLog) { Text("Share log", color = AdsbColors.Primary) }
             // TEMP DEBUG: history investigation — delete this button with the rest.
             TextButton(onClick = onShareHistoryDebug) { Text("Share debug", color = AdsbColors.Primary) }
+            TextButton(onClick = { onCheckGlobalDb { text -> globalDbStatus = text } }) {
+                Text("Check DB", color = AdsbColors.Primary)
+            }
             if (entries.isNotEmpty()) {
                 TextButton(onClick = onShare) { Text("Share", color = AdsbColors.Primary) }
                 TextButton(onClick = onClear) { Text("Clear", color = AdsbColors.Primary) }
             }
+        }
+
+        globalDbStatus?.let { text ->
+            AlertDialog(
+                onDismissRequest = { globalDbStatus = null },
+                confirmButton = { TextButton(onClick = { globalDbStatus = null }) { Text("OK") } },
+                title = { Text("Global Aircraft DB") },
+                text = { Text(text, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 13.sp) },
+            )
         }
 
         // Filter + sort + group row

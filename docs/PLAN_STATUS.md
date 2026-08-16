@@ -2953,3 +2953,46 @@ instruction), debug APK built and added to `dist/`. Not verified on-device
 — first real run needs Wi-Fi to complete the initial ~14MB import before
 the local-mirror-hit path has anything to answer from; worth confirming
 the enrichment log shows `global-db` as a source afterward.
+
+## 56. §55's two visibility gaps closed + a status check (2026-08-16, v2.2.1)
+
+Avi caught both gaps §55 introduced by comparing a real on-device log
+against what the redesign should have produced for C027D7 — hexdb and
+adsbdb-aircraft both fired and succeeded, meaning the request fell straight
+through to full network lookup, with no way to tell from the log whether
+the local mirror was checked, missing, or never downloaded at all.
+
+**Fix 1 — local-mirror check now logged.** `GlobalAircraftDb.lookup()`
+writes an `ENRICHMENT_ATTEMPT` row (`source = "global-db"`) on every
+check — hit with what it found, or "not in mirror" on a miss — into the
+same per-icao `aircraft_event_log` the detail screen already reads, no UI
+changes needed for it to show up. Naturally rate-limited the same way
+hexdb/adsbdb attempts already are: only reached on a 2h `aircraft_meta_cache`
+miss, not on every position update.
+
+**Fix 2 — refresh outcome now logged.** `refreshIfNeeded()` writes an
+`ENRICHMENT_ATTEMPT` row too, under a sentinel icao (`GLOBAL_DB`,
+`source = "global-db-refresh"`) since it's not about one aircraft — shows
+up in the existing "Share log" CSV export automatically. Success logs the
+row count and whether a download actually happened or the file was
+unchanged; failure logs the real exception. `GlobalAircraftImportEntity`
+gained `errorMessage` (`MIGRATION_9_10`, version 9→10) — set on a failed
+attempt, cleared on the next success, while `importedAtMs`/`rowCount`
+always keep the *last successful* import's data so a lookup still has
+something to work with while an error is showing.
+
+**"Upgrade the log checker"** — a new "Check DB" button on the History
+screen (`PipelineService.checkGlobalDbStatus()`) reads
+`GlobalAircraftImportEntity` directly and shows a plain-language status in
+a dialog: row count + last-updated time, or "not downloaded yet (needs
+Wi-Fi)" before the first import, or the last error alongside the
+last-known-good data if a recent refresh failed. This is the one place in
+the app to actually check the mirror's health without exporting a CSV —
+the sentinel-icao refresh-log rows are exportable but not visible in any
+per-aircraft screen, since that screen is icao-scoped by design.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` pass (`AppDatabaseMigrationTests`
+needed `MIGRATION_9_10` added to its 4 fixture builders, same recurring
+gap as `MIGRATION_7_8`/`MIGRATION_8_9` before it), `:app:assembleDebug`
+passes. Version bumped to v2.2.1 (`versionCode` 44), debug APK built and
+added to `dist/`. Not verified on-device.

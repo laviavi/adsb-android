@@ -128,6 +128,9 @@ class MainActivity : ComponentActivity() {
                             if (file != null) shareCsv(this@MainActivity, file, "Share history debug log")
                         }
                     },
+                    onCheckGlobalDb = { onResult ->
+                        pipelineService?.checkGlobalDbStatus(onResult) ?: onResult("Pipeline service not connected.")
+                    },
                     onResetCounters = { pipelineService?.resetStatsCounters() },
                     onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
                     onRetryEnrichment = { icao -> pipelineService?.retryEnrichment(icao) },
@@ -186,6 +189,7 @@ private fun AdsbScaffold(
     onShareHistory: () -> Unit,
     onShareEventLog: () -> Unit,
     onShareHistoryDebug: () -> Unit, // TEMP DEBUG: history investigation — delete with the rest
+    onCheckGlobalDb: (onResult: (String) -> Unit) -> Unit,
     onResetCounters: () -> Unit,
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
     onRetryEnrichment: (String) -> Unit,
@@ -308,6 +312,7 @@ private fun AdsbScaffold(
                         onShareHistory = onShareHistory,
                         onShareEventLog = onShareEventLog,
                         onShareHistoryDebug = onShareHistoryDebug,
+                        onCheckGlobalDb = onCheckGlobalDb,
                         onExit = onExit,
                     )
                 }
