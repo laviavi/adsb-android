@@ -46,6 +46,19 @@ object RtlSdrDefaults {
     const val SESSION_PROOF_TIMEOUT_MS = 2_000
 
     /**
+     * How long to wait for the driver app to hand back a result before giving up
+     * on this attempt. Previously unbounded — a stuck driver Activity (a wedged
+     * permission dialog, backgrounded, or wedged internal state after a physical
+     * unplug) suspended forever, holding `PipelineService.sessionLock` forever
+     * along with it, which blocked every other reconnect path — the retry loop's
+     * own reopen, the hotplug accelerator, and a manual Reconnect tap — with no
+     * way out except killing the whole app process. A normal driver handoff is
+     * sub-second; this is generous headroom for a slow permission dialog without
+     * making a genuinely stuck driver take minutes to be noticed.
+     */
+    const val DRIVER_RESULT_TIMEOUT_MS = 20_000L
+
+    /**
      * Build the `iqsrc://` URI string for the driver app. Arguments match
      * SdrTcpArguments in the signalware SDK; `gainTenths` is passed through as
      * tenths of a dB, which is what the driver expects — not whole dB.

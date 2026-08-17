@@ -2996,3 +2996,61 @@ needed `MIGRATION_9_10` added to its 4 fixture builders, same recurring
 gap as `MIGRATION_7_8`/`MIGRATION_8_9` before it), `:app:assembleDebug`
 passes. Version bumped to v2.2.1 (`versionCode` 44), debug APK built and
 added to `dist/`. Not verified on-device.
+
+## 57. USB reconnect fourth attempt — bounded the actual unbounded wait, not detection (2026-08-16, v2.2.2)
+
+Avi: "disconnecting and reconnecting the antenna doesn't always restart and
+many times only exiting and reopening the app helps." §19 already covers
+three prior "fix reconnect" attempts that all targeted detection logic and
+shipped with green tests that proved nothing on real hardware — this one is
+held to a higher bar as a result: integrate into the *existing*
+retry/backoff structure, and make a wrong guess provable from a log line
+instead of silently invisible.
+
+**Root cause.** `PipelineService.openUsbSource()` suspended indefinitely —
+no timeout — waiting for the `ACTION_DRIVER_RESULT` broadcast that only
+fires once the separate driver app's own Activity returns. If that Activity
+gets stuck (wedged permission dialog, backgrounded, wedged after a physical
+unplug), the wait hangs forever. `openUsbSource()` always runs inside
+`sessionLock`, the `Mutex` every reconnect path acquires —
+`startPipeline()`, `restartPipeline()` (hotplug *and* the UI's Reconnect
+button), `stopPipeline()`, the retry loop's own reopen. One stuck attempt
+holds the lock forever; every other path blocks acquiring the same lock and
+never returns. Only killing the process frees a `Mutex` held by a coroutine
+suspended forever — this matches "only exiting and reopening the app helps"
+exactly.
+
+**Fix.**
+
+| Change | File |
+|---|---|
+| `DRIVER_RESULT_TIMEOUT_MS = 20_000L` — new bounded wait | `RtlSdrDefaults.kt` |
+| `openUsbSource()`: the `suspendCancellableCoroutine` wait wrapped in `withTimeoutOrNull(...)`, not the whole function — a timeout converts to `SdrDriverFailedException` *inside* the function so it flows into the existing catch chain in `startPipelineInternal()` rather than being caught by that loop's own `catch (e: CancellationException) { throw e }` guard (`withTimeout` would have thrown a `CancellationException` subtype into that exact trap — the same shape as attempts #2/#3 in §19) | `PipelineService.kt` |
+| `DRIVER_TIMEOUT_MESSAGE` — distinct `SourceState.Error` text from `DRIVER_BUSY_MESSAGE`/`NO_DONGLE_MESSAGE`, so a real occurrence is unambiguous from the UI, not indistinguishable from a genuinely unplugged dongle | `PipelineService.kt` |
+| Per-attempt `requestToken` (`SdrLaunchConfig`, `System.nanoTime()`), echoed back on the result broadcast and checked before resuming — otherwise a late reply from an attempt already timed out and abandoned could resolve a *newer* attempt's wait with stale data, a new failure mode the timeout itself would introduce | `SdrLaunchConfig.kt`, `PipelineService.kt`, `SdrSourceActivity.kt` |
+| `SdrSourceActivity` give-up receiver (`ACTION_GIVE_UP`, token-matched) → `finishAndRemoveTask()`, so it stops lingering as a background task once its wait is abandoned. Cannot reach the driver app's own stuck Activity this way — no cross-app API exists for that; a wedged driver may still need a manual force-stop, same as the existing `DRIVER_BUSY_MESSAGE` case already tells users | `SdrSourceActivity.kt` |
+| `warnIfScopeDead()` — one log line in `startPipeline()`/`restartPipeline()`/`stopPipeline()` when `serviceScope` is already cancelled (the idle watchdog's doing), so that no-op is provable from a log instead of looking identical to the hang this fix targets. Pure visibility, not a redesign | `PipelineService.kt` |
+
+**Plan deviation.** The approved plan's cleanup item — removing the
+`USB_DEVICE_ATTACHED` manifest intent-filter on `MainActivity` as "confirmed
+unused" — was wrong and was skipped. `UsbPresence.kt`'s own doc comment
+states `ACTION_USB_DEVICE_ATTACHED` is delivered via that manifest
+device-filter; removing it would drop the OS-level auto-permission-grant
+tied to `usb_device_filter.xml`, not clean up dead code. Left untouched.
+
+`:core:receiver:test` + `:app:testDebugUnitTest` + `:app:assembleDebug` all
+pass. Version bumped to v2.2.2 (`versionCode` 45), debug APK built and
+added to `dist/`.
+
+**Not verified on-device — required before this can be called fixed**, per
+§19's history: force-stop the driver app (`adb shell am force-stop
+marto.rtl_tcp_andro`) immediately after the `iqsrc://` intent fires, or
+unplug during its dialog window, then confirm in
+`adb logcat -s AdsbErrorLog:* -v time` that the timeout error line appears,
+`SourceState.Error(DRIVER_TIMEOUT_MESSAGE)` shows in the Live/Receiver
+banner, and the retry loop resumes on its own once the dongle is
+re-detected — no relaunch, no repeated Reconnect taps. A tap during the
+hang should queue behind the lock and succeed once the timeout releases it.
+If the timeout log line never appears, the hang isn't in this wait at all —
+re-investigate from `adb shell dumpsys activity activities | grep -i
+rtl_tcp` before touching this code again.

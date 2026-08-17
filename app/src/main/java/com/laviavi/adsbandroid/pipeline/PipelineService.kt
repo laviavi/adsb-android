@@ -738,11 +738,25 @@ class PipelineService : Service() {
         _resolvedObserverPosition.value = lat to lon
     }
 
+    /**
+     * The idle watchdog cancels [serviceScope] on expiry (by design - see [sourceWatchdog]).
+     * A call that lands after that point silently no-ops instead of doing anything, which
+     * looks identical to a hung reconnect from the outside. This is pure visibility so that
+     * case is provable from a log line rather than mistaken for the driver-timeout bug.
+     */
+    private fun warnIfScopeDead(caller: String) {
+        if (!serviceScope.isActive) {
+            ErrorLog.warn("[USB] $caller called after serviceScope was cancelled (idle watchdog) - no-op")
+        }
+    }
+
     fun stopPipeline() {
+        warnIfScopeDead("stopPipeline")
         serviceScope.launch { sessionLock.withLock { teardownSession() } }
     }
 
     fun startPipeline() {
+        warnIfScopeDead("startPipeline")
         serviceScope.launch {
             sessionLock.withLock {
                 if (pipelineJob?.isActive == true) return@withLock
@@ -755,6 +769,7 @@ class PipelineService : Service() {
     fun reconnect() = restartPipeline()
 
     fun restartPipeline() {
+        warnIfScopeDead("restartPipeline")
         serviceScope.launch {
             sessionLock.withLock {
                 teardownSession()
@@ -859,8 +874,14 @@ class PipelineService : Service() {
                     // from an earlier session. Retrying cannot clear it, and the
                     // driver app exposes no way to ask it to let go.
                     val busy = e.message?.contains("BUSY", ignoreCase = true) == true
-                    _sourceState.value =
-                        SourceState.Error(if (busy) DRIVER_BUSY_MESSAGE else NO_DONGLE_MESSAGE)
+                    val timedOut = e.message?.contains(DRIVER_TIMEOUT_MARKER) == true
+                    _sourceState.value = SourceState.Error(
+                        when {
+                            timedOut -> DRIVER_TIMEOUT_MESSAGE
+                            busy -> DRIVER_BUSY_MESSAGE
+                            else -> NO_DONGLE_MESSAGE
+                        }
+                    )
                 } catch (e: Exception) {
                     ErrorLog.error(describeError(e), e)
                     _sourceState.value = SourceState.Error(NO_DONGLE_MESSAGE)
@@ -1026,6 +1047,8 @@ class PipelineService : Service() {
             return
         }
 
+        val requestToken = System.nanoTime()
+
         val launchConfig = SdrLaunchConfig(
             port         = UsbRtlSdrSource.LOOPBACK_PORT,
             frequencyHz  = UsbRtlSdrSource.CENTER_FREQ_HZ,
@@ -1035,27 +1058,46 @@ class PipelineService : Service() {
             // driver's own no-gain fallback is a fixed 2.4dB, not real AGC.
             gainTenths   = if (currentConfig.autoGain) 0 else currentConfig.gainTenths,
             ppm          = currentConfig.ppmCorrection,
+            requestToken = requestToken,
         )
 
-        suspendCancellableCoroutine<Unit> { cont ->
-            val receiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    unregisterReceiver(this)
-                    val success = intent.getBooleanExtra(SdrSourceActivity.EXTRA_SUCCESS, false)
-                    if (success) cont.resume(Unit)
-                    else {
-                        val msg = intent.getStringExtra(SdrSourceActivity.EXTRA_ERROR_MESSAGE)
-                        cont.resumeWithException(SdrDriverFailedException(-1, msg))
+        val result = withTimeoutOrNull(RtlSdrDefaults.DRIVER_RESULT_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Unit> { cont ->
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context, intent: Intent) {
+                        // A late reply from an attempt we already gave up waiting on
+                        // (timed out) must not resolve this - or a future - attempt's wait.
+                        if (intent.getLongExtra(SdrSourceActivity.EXTRA_TOKEN, -1L) != requestToken) return
+                        unregisterReceiver(this)
+                        val success = intent.getBooleanExtra(SdrSourceActivity.EXTRA_SUCCESS, false)
+                        if (success) cont.resume(Unit)
+                        else {
+                            val msg = intent.getStringExtra(SdrSourceActivity.EXTRA_ERROR_MESSAGE)
+                            cont.resumeWithException(SdrDriverFailedException(-1, msg))
+                        }
                     }
                 }
+                ContextCompat.registerReceiver(
+                    this@PipelineService, receiver,
+                    IntentFilter(SdrSourceActivity.ACTION_DRIVER_RESULT),
+                    ContextCompat.RECEIVER_NOT_EXPORTED,
+                )
+                cont.invokeOnCancellation { runCatching { unregisterReceiver(receiver) } }
+                startActivity(SdrSourceActivity.createIntent(this@PipelineService, launchConfig))
             }
-            ContextCompat.registerReceiver(
-                this, receiver,
-                IntentFilter(SdrSourceActivity.ACTION_DRIVER_RESULT),
-                ContextCompat.RECEIVER_NOT_EXPORTED,
+        }
+
+        if (result == null) {
+            sendBroadcast(
+                Intent(SdrSourceActivity.ACTION_GIVE_UP).apply {
+                    putExtra(SdrSourceActivity.EXTRA_TOKEN, requestToken)
+                    setPackage(packageName)
+                }
             )
-            cont.invokeOnCancellation { runCatching { unregisterReceiver(receiver) } }
-            startActivity(SdrSourceActivity.createIntent(this, launchConfig))
+            throw SdrDriverFailedException(
+                -2,
+                "driver did not respond within ${RtlSdrDefaults.DRIVER_RESULT_TIMEOUT_MS}ms ($DRIVER_TIMEOUT_MARKER)",
+            )
         }
 
         source.openNetworkSource(loopbackConfig)
@@ -1340,6 +1382,14 @@ class PipelineService : Service() {
         const val DRIVER_BUSY_MESSAGE =
             "the RTL-SDR driver app is still holding the dongle from a previous session - " +
             "force-stop the driver app, or unplug and replug the dongle, then reconnect"
+
+        /** The driver app never returned a result within [com.laviavi.adsbandroid.capture.RtlSdrDefaults.DRIVER_RESULT_TIMEOUT_MS] — distinct from [NO_DONGLE_MESSAGE] so this is provable from the UI, not indistinguishable from a genuinely unplugged dongle. */
+        const val DRIVER_TIMEOUT_MESSAGE =
+            "the RTL-SDR driver app did not respond - it may be stuck; reconnect will keep " +
+            "retrying, but a driver app force-stop may be needed"
+
+        /** Marker substring `openUsbSource()` puts in a timeout-triggered [SdrDriverFailedException]'s message, so the catch site can tell it apart from a plain driver-returned failure. */
+        internal const val DRIVER_TIMEOUT_MARKER = "DRIVER_RESULT_TIMEOUT"
     }
 }
 
