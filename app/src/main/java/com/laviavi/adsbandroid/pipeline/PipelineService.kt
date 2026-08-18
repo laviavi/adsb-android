@@ -35,7 +35,6 @@ import com.laviavi.adsbandroid.data.FlightAwareEnrichment
 import com.laviavi.adsbandroid.data.typeDisplay
 import com.laviavi.adsbandroid.data.RouteEnrichment
 import com.laviavi.adsbandroid.enrich.Airlines
-import com.laviavi.adsbandroid.enrich.DataSource
 import com.laviavi.adsbandroid.location.GpsPolicy
 import com.laviavi.adsbandroid.location.GpsThrottlePolicy
 import com.laviavi.adsbandroid.location.ObserverMode
@@ -984,7 +983,8 @@ class PipelineService : Service() {
                         registration  = s.registration,
                         operator      = s.operator,
                         aircraftType  = s.aircraftType,
-                        isAirline     = s.operatorSource == DataSource.ALGORITHMIC,
+                        isAirline     = Airlines.fromCallsign(s.callsign) != null ||
+                            Airlines.matchesKnownAirlineName(s.operator),
                         firstSeenMs   = s.firstSeenMs,
                         lastSeenMs    = s.lastSeenMs,
                         messageCount  = s.messageCount,

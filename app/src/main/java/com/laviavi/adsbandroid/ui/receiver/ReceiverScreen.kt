@@ -585,21 +585,21 @@ private fun CoverageCard(
                 row.bestSector?.let { best ->
                     val v = row.sectors[best]?.maxMi ?: 0.0
                     Text(
-                        "best ${best.name} ${unit.formatWhole(v / NM_TO_MI)}",
+                        "Best ${best.name} ${unit.formatWhole(v / NM_TO_MI)}",
                         fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AdsbColors.Success,
                     )
                 }
                 row.worstSector?.let { worst ->
                     val v = row.sectors[worst]?.maxMi ?: 0.0
                     Text(
-                        "worst ${worst.name} ${unit.formatWhole(v / NM_TO_MI)}",
+                        "Worst ${worst.name} ${unit.formatWhole(v / NM_TO_MI)}",
                         fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AdsbColors.Warning,
                     )
                 }
 
                 bestRange?.let {
                     Text(
-                        "best ever ${unit.formatWhole(it.distanceNm)} · ${it.callsign ?: it.icao} · " +
+                        "Best ever ${unit.formatWhole(it.distanceNm)} · ${it.callsign ?: it.icao} · " +
                             bestRangeDateFormat.format(Date(it.timestampMs)),
                         fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.Primary,
                     )

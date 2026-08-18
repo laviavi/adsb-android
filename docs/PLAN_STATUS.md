@@ -3054,3 +3054,106 @@ hang should queue behind the lock and succeed once the timeout releases it.
 If the timeout log line never appears, the hang isn't in this wait at all —
 re-investigate from `adb shell dumpsys activity activities | grep -i
 rtl_tcp` before touching this code again.
+
+## 58. History tab: overflow menu + 3 more group-by options (2026-08-16, v2.2.3)
+
+Avi: the five History action buttons (Share log / Share debug / Check DB /
+Share / Clear) needed to be in a menu, not a growing row — this is §22 from
+the "item for later" backlog, now done. Also asked for Group by to cover
+airline, weekday, day, hour, destination, origin (previously: airline, day,
+hour only).
+
+- `HistoryScreen.kt`: the button row is now a single `IconButton` +
+  `DropdownMenu` (`Icons.Default.MoreVert`), same pattern as `LiveScreen.kt`'s
+  existing overflow menu. All five actions moved in as `DropdownMenuItem`s,
+  behavior unchanged (Share/Clear still gated on `entries.isNotEmpty()`).
+- `HistoryGroupBy` gained `WEEKDAY`, `DESTINATION`, `ORIGIN`. Weekday groups
+  by day-of-week name across all dates (Monday..Sunday order, not
+  alphabetical); Day is unchanged (groups by calendar date). Origin/destination
+  are derived by splitting `AircraftSeenEntity.route` — stored as
+  `"ORIGIN-DEST"` (`RouteEnrichment.parseAdsbdbRoute`) — there's no separate
+  origin/destination column on this entity, only the combined route string. A
+  null or unparsable route groups under "Unknown".
+
+`:app:compileDebugKotlin` passes, `:app:assembleDebug` passes as part of
+v2.2.3 (below).
+
+## 59. Coverage polar: capitalized best/worst labels + shape no longer overlaps compass labels (2026-08-17, v2.2.3)
+
+Two small Receiver-tab fixes, found while investigating §60's Stats bug on
+the live device.
+
+- **Capitalization.** "best NE 42nm" / "worst SW 8nm" / "best ever …" read
+  as `best`/`worst` (lowercase) in `CoverageCard` — capitalized to
+  `Best`/`Worst`/`Best ever` (`ReceiverScreen.kt`).
+- **Polar shape overlapping the compass labels.** `CoveragePolar`
+  (`ReceiverCharts.kt`) drew the rings/polygon out to the full canvas radius
+  (`maxRadius`) while the N/NE/E/… labels sit at `0.94 × maxRadius` — a
+  sector near its max value pushed the filled shape right into the label
+  text. Introduced `plotRadius = maxRadius * 0.78f`; rings, spokes, and the
+  polygon's `innerR`/`spanR` now scale off that instead of `maxRadius`
+  directly, leaving a real margin before the labels start. Labels
+  themselves unchanged (still anchored near the true canvas edge).
+
+`:app:compileDebugKotlin` passes, built into v2.2.3 (below).
+
+## 60. Stats tab investigated: root cause found, fix designed, awaiting Avi's call on 2 open questions
+
+Avi: Stats showed nothing but the "appear here once they've departed"
+placeholder, and asked why — also confirmed History has real data and that
+Stats is meant to be a permanent, all-time log (not per-session), which
+matches §27's original design intent exactly.
+
+**Investigated on the live device, not guessed.** Paired ADB wireless
+debugging to the SM-S928B (`adb pair`/`adb connect`), pulled the day's
+`history_debug_*.csv` (the temp debug aid from §51/§52) — confirms every
+`aircraft_visits` write this session logged `WRITE_OK`, no failures. Pulled
+the actual on-device `adsb.db` (+ `-wal`/`-shm`, via `run-as` → external
+storage → `adb pull`) and queried it with the SDK's bundled `sqlite3.exe`
+(no sqlite3/python on the device or this machine otherwise): **71 visits
+recorded, all 71 have `isAirline = 0`** — including Southwest, Delta,
+United, SkyWest, Air Canada, UPS. Diagnostic DB copy deleted from device
+external storage after the query.
+
+**Root cause.** `isAirline = (operatorSource == DataSource.ALGORITHMIC)`
+(§27's original rule) predates §55's meta-enrichment redesign. Before §55,
+the offline callsign-prefix table (`Airlines.fromCallsign`) was usually
+what supplied the operator name for a real airline flight, so
+`operatorSource == ALGORITHMIC` was a reasonable proxy for "this is an
+airline." After §55, registration-based sources (global aircraft mirror,
+hexdb, adsbdb owner records) now win the merge for almost every aircraft —
+correct, real airline names, just not sourced *algorithmically* — so
+`isAirline` is false for virtually everything. The "By airline" tab (the
+default tab) reads as permanently empty for real-world traffic; not a
+write bug, a stale classification rule §55 silently broke.
+
+**Fix applied.** Avi's call: leave the 71 existing rows misclassified (no
+backfill — `aircraft_visits` doesn't store callsign, so fixing them isn't a
+plain `UPDATE`, and it wasn't worth a migration for it), and include the
+operator-name fallback.
+
+`isAirline` (`PipelineService.kt:987`) is now
+`Airlines.fromCallsign(s.callsign) != null || Airlines.matchesKnownAirlineName(s.operator)`.
+
+**`Airlines.matchesKnownAirlineName()`** (new, `Airlines.kt`) — normalizes
+both the FAA-style operator string and this table's own values the same
+way (uppercase, strip a trailing corporate-suffix word — INC/CO/CORP/LLC/
+LTD/COMPANY/HOLDINGS/GROUP/CORPORATION) before comparing, so "SOUTHWEST
+AIRLINES CO" matches this table's "Southwest Airlines" without needing a
+second data source. New `AirlinesTests.kt` (2 tests): real FAA-style
+airline names match despite case/suffix, private owners and leasing
+entities (`"WILMINGTON TRUST CO TRUSTEE"`, `"C C & E I LLC"`) correctly
+don't.
+
+`DataSource` import dropped from `PipelineService.kt` — no longer
+referenced there. Full suite (`:core:receiver:test` + `:app:testDebugUnitTest`)
+and `:app:compileDebugKotlin` pass.
+
+## 61. §58–60 built and deployed (2026-08-17, v2.2.3)
+
+Version bumped to v2.2.3 (`versionCode` 46). `:app:assembleDebug` passes,
+debug APK built and added to `dist/`. Installed on the Samsung SM-S928B
+over wireless ADB (paired earlier this session at §60's investigation).
+Not yet manually verified in the app — History's overflow menu/group-by,
+the Coverage polar/label fixes, and the Stats airline reclassification all
+need a look on-device to confirm the intended UI matches what's live.

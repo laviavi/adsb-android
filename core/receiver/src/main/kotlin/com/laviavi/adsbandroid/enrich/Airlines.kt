@@ -31,6 +31,34 @@ object Airlines {
         return cs.length >= 2 && cs[0] == 'N' && cs[1].isDigit()
     }
 
+    /**
+     * True when [name] names one of the airlines in [MAP], for aircraft whose
+     * operator resolved from a registration/owner source (FAA registry, the
+     * global aircraft mirror) rather than from the callsign — same real
+     * airline, just not identifiable by [fromCallsign] alone. FAA-style names
+     * ("SOUTHWEST AIRLINES CO") differ from this table's ("Southwest
+     * Airlines") only by case and a trailing corporate suffix, so both sides
+     * are normalized the same way before comparing.
+     */
+    fun matchesKnownAirlineName(name: String?): Boolean {
+        val n = name?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        return normalizeOperatorName(n) in NORMALIZED_NAMES
+    }
+
+    private val CORPORATE_SUFFIX_WORDS = setOf(
+        "INC", "CO", "CORP", "CORPORATION", "LLC", "LTD", "COMPANY", "HOLDINGS", "GROUP",
+    )
+
+    private fun normalizeOperatorName(name: String): String {
+        var words = name.uppercase().replace(Regex("[.,]"), "").trim().split(Regex("\\s+"))
+        while (words.isNotEmpty() && words.last() in CORPORATE_SUFFIX_WORDS) {
+            words = words.dropLast(1)
+        }
+        return words.joinToString(" ")
+    }
+
+    private val NORMALIZED_NAMES: Set<String> by lazy { MAP.values.map { normalizeOperatorName(it) }.toSet() }
+
     val size: Int get() = MAP.size
 
     private val MAP: Map<String, String> = mapOf(

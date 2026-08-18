@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,9 +32,19 @@ enum class HistorySortOrder(val label: String) {
 enum class HistoryGroupBy(val label: String) {
     NONE("None"),
     AIRLINE("Airline"),
+    WEEKDAY("Weekday"),
     DAY("Day"),
     HOUR("Hour"),
+    DESTINATION("Destination"),
+    ORIGIN("Origin"),
 }
+
+/** [AircraftSeenEntity.route] is stored as "ORIGIN-DEST" (see RouteEnrichment.parseAdsbdbRoute). */
+private fun AircraftSeenEntity.origin(): String =
+    route?.substringBefore('-')?.takeIf { it.isNotBlank() } ?: "Unknown"
+
+private fun AircraftSeenEntity.destination(): String =
+    route?.substringAfter('-', missingDelimiterValue = "")?.takeIf { it.isNotBlank() } ?: "Unknown"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -50,6 +62,7 @@ fun HistoryScreen(
     var groupBy by remember { mutableStateOf(HistoryGroupBy.NONE) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showGroupMenu by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     var globalDbStatus by remember { mutableStateOf<String?>(null) }
 
     val filtered = remember(entries, filter) {
@@ -93,18 +106,38 @@ fun HistoryScreen(
                 color = AdsbColors.TextPrimary,
                 modifier = Modifier.weight(1f),
             )
-            // Event log covers every icao ever logged, independent of aircraft_seen (this
-            // screen's own data) — always offered, not gated on `entries` being non-empty,
-            // since it's the only way to retrieve a departed aircraft's enrichment log.
-            TextButton(onClick = onShareEventLog) { Text("Share log", color = AdsbColors.Primary) }
-            // TEMP DEBUG: history investigation — delete this button with the rest.
-            TextButton(onClick = onShareHistoryDebug) { Text("Share debug", color = AdsbColors.Primary) }
-            TextButton(onClick = { onCheckGlobalDb { text -> globalDbStatus = text } }) {
-                Text("Check DB", color = AdsbColors.Primary)
-            }
-            if (entries.isNotEmpty()) {
-                TextButton(onClick = onShare) { Text("Share", color = AdsbColors.Primary) }
-                TextButton(onClick = onClear) { Text("Clear", color = AdsbColors.Primary) }
+            Box {
+                IconButton(onClick = { showOverflowMenu = true }) {
+                    Icon(Icons.Default.MoreVert, "More options", tint = AdsbColors.TextSecondary)
+                }
+                DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
+                    // Event log covers every icao ever logged, independent of aircraft_seen
+                    // (this screen's own data) — always offered, not gated on `entries` being
+                    // non-empty, since it's the only way to retrieve a departed aircraft's log.
+                    DropdownMenuItem(
+                        text = { Text("Share log") },
+                        onClick = { showOverflowMenu = false; onShareEventLog() },
+                    )
+                    // TEMP DEBUG: history investigation — delete this item with the rest.
+                    DropdownMenuItem(
+                        text = { Text("Share debug") },
+                        onClick = { showOverflowMenu = false; onShareHistoryDebug() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Check DB") },
+                        onClick = { showOverflowMenu = false; onCheckGlobalDb { text -> globalDbStatus = text } },
+                    )
+                    if (entries.isNotEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("Share") },
+                            onClick = { showOverflowMenu = false; onShare() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear") },
+                            onClick = { showOverflowMenu = false; onClear() },
+                        )
+                    }
+                }
             }
         }
 
@@ -201,6 +234,19 @@ fun HistoryScreen(
                         }
                     }
                 }
+                HistoryGroupBy.WEEKDAY -> {
+                    val weekdayFmt = SimpleDateFormat("EEEE", Locale.getDefault())
+                    val order = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+                    val grouped = sorted
+                        .groupBy { weekdayFmt.format(Date(it.lastSeenMs)) }
+                        .entries.sortedBy { order.indexOf(it.key) }
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        grouped.forEach { (weekday, group) ->
+                            stickyHeader(key = "hdr_$weekday") { GroupHeader(weekday) }
+                            items(group, key = { it.icao }) { HistoryRow(it) }
+                        }
+                    }
+                }
                 HistoryGroupBy.DAY -> {
                     val dayFmt = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
                     val grouped = sorted
@@ -221,6 +267,24 @@ fun HistoryScreen(
                     LazyColumn(Modifier.fillMaxSize()) {
                         grouped.forEach { (hour, group) ->
                             stickyHeader(key = "hdr_$hour") { GroupHeader(hour) }
+                            items(group, key = { it.icao }) { HistoryRow(it) }
+                        }
+                    }
+                }
+                HistoryGroupBy.DESTINATION -> {
+                    val grouped = sorted.groupBy { it.destination() }.entries.sortedBy { it.key }
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        grouped.forEach { (dest, group) ->
+                            stickyHeader(key = "hdr_$dest") { GroupHeader(dest) }
+                            items(group, key = { it.icao }) { HistoryRow(it) }
+                        }
+                    }
+                }
+                HistoryGroupBy.ORIGIN -> {
+                    val grouped = sorted.groupBy { it.origin() }.entries.sortedBy { it.key }
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        grouped.forEach { (origin, group) ->
+                            stickyHeader(key = "hdr_$origin") { GroupHeader(origin) }
                             items(group, key = { it.icao }) { HistoryRow(it) }
                         }
                     }

@@ -118,8 +118,11 @@ fun CoveragePolar(
         ) {
             val centre = Offset(size.width / 2f, size.height / 2f)
             val maxRadius = min(size.width, size.height) / 2f
-            val innerR = maxRadius * (21f / 62f)
-            val spanR = maxRadius * (41f / 62f)
+            // Shape stops short of maxRadius so it never overlaps the compass
+            // labels, which sit near the canvas edge (see lr below).
+            val plotRadius = maxRadius * 0.78f
+            val innerR = plotRadius * (21f / 62f)
+            val spanR = plotRadius * (41f / 62f)
 
             // Rings
             listOf(0.33f, 0.66f, 1f).forEach { f ->
@@ -137,8 +140,8 @@ fun CoveragePolar(
                     color = AdsbColors.SurfaceElevated,
                     start = centre,
                     end = Offset(
-                        centre.x + (cos(rad) * maxRadius).toFloat(),
-                        centre.y + (sin(rad) * maxRadius).toFloat(),
+                        centre.x + (cos(rad) * plotRadius).toFloat(),
+                        centre.y + (sin(rad) * plotRadius).toFloat(),
                     ),
                     strokeWidth = 1.dp.toPx(),
                 )
