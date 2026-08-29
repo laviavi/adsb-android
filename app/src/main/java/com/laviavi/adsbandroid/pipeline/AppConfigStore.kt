@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.map.BaseMap
+import com.laviavi.adsbandroid.ui.map.MapLabelField
 import com.laviavi.adsbandroid.ui.map.MapLabelSize
 import com.laviavi.adsbandroid.ui.map.RingColorPreset
 import com.laviavi.adsbandroid.ui.map.RingLineStyle
@@ -45,7 +46,7 @@ class AppConfigStore(private val context: Context) {
         val acceptRateWindow     = intPreferencesKey("accept_rate_window_seconds")
         val distanceUnit         = stringPreferencesKey("distance_unit")
         val mapRangeRings        = booleanPreferencesKey("map_show_range_rings")
-        val mapLabels            = booleanPreferencesKey("map_show_labels")
+        val mapLabelFields       = stringPreferencesKey("map_label_fields")
         val mapGroundTraffic     = booleanPreferencesKey("map_show_ground_traffic")
         val mapTrailLength       = intPreferencesKey("map_trail_length")
         val mapRingRadii         = stringPreferencesKey("map_ring_radii_mi")
@@ -88,7 +89,9 @@ class AppConfigStore(private val context: Context) {
                 ?.let { runCatching { DistanceUnit.valueOf(it) }.getOrNull() }
                 ?: defaults.distanceUnit,
             mapShowRangeRings    = prefs[Keys.mapRangeRings] ?: defaults.mapShowRangeRings,
-            mapShowLabels        = prefs[Keys.mapLabels] ?: defaults.mapShowLabels,
+            mapLabelFields = prefs[Keys.mapLabelFields]
+                ?.let { s -> s.split(",").mapNotNull { f -> runCatching { MapLabelField.valueOf(f.trim()) }.getOrNull() }.toSet() }
+                ?: defaults.mapLabelFields,
             mapShowGroundTraffic = prefs[Keys.mapGroundTraffic] ?: defaults.mapShowGroundTraffic,
             mapTrailLength       = prefs[Keys.mapTrailLength] ?: defaults.mapTrailLength,
             mapRingRadiiMi = prefs[Keys.mapRingRadii]
@@ -140,7 +143,7 @@ class AppConfigStore(private val context: Context) {
             prefs[Keys.acceptRateWindow]   = config.acceptRateWindowSeconds
             prefs[Keys.distanceUnit]       = config.distanceUnit.name
             prefs[Keys.mapRangeRings]      = config.mapShowRangeRings
-            prefs[Keys.mapLabels]          = config.mapShowLabels
+            prefs[Keys.mapLabelFields]     = config.mapLabelFields.joinToString(",") { it.name }
             prefs[Keys.mapGroundTraffic]   = config.mapShowGroundTraffic
             prefs[Keys.mapTrailLength]     = config.mapTrailLength
             prefs[Keys.mapRingRadii]       = config.mapRingRadiiMi.joinToString(",")

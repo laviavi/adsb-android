@@ -204,11 +204,17 @@ object CoverageMetrics {
      * Deliberate simplification: only count and max range survive the
      * persisted aggregation (`SUM`/`MAX` over every past tick), not the full
      * distance distribution — so `medianMi`/`p90Mi` collapse to `maxMi` here.
-     * Altitude-band counts aren't tracked historically at all (empty). The
-     * symmetry score and best/worst sector still reuse [symmetryScore]
-     * unchanged, since those only need the per-sector medians.
+     * [altitudeCounts] is a separately accumulated `SUM` over the same
+     * history (missing bands default to 0). The symmetry score and
+     * best/worst sector still reuse [symmetryScore] unchanged, since those
+     * only need the per-sector medians.
      */
-    fun synthesizeAllTimeRow(totals: List<SectorTotal>, observerLat: Double, observerLon: Double): CoverageMetricsRow {
+    fun synthesizeAllTimeRow(
+        totals: List<SectorTotal>,
+        observerLat: Double,
+        observerLon: Double,
+        altitudeCounts: Map<AltitudeBand, Int> = emptyMap(),
+    ): CoverageMetricsRow {
         val bySector = totals.associateBy { it.sector }
         val sectorStats = CompassSector.entries.associateWith { sector ->
             val t = bySector[sector]
@@ -223,12 +229,37 @@ object CoverageMetrics {
             observerLon = observerLon,
             aircraftWithPosition = totals.sumOf { it.count },
             sectors = sectorStats,
-            altitudeCounts = AltitudeBand.entries.associateWith { 0 },
+            altitudeCounts = AltitudeBand.entries.associateWith { altitudeCounts[it] ?: 0 },
             symmetryScore = symmetryScore(sectorMedians),
             bestSector = activeSectors.maxByOrNull { it.value }?.key,
             worstSector = activeSectors.minByOrNull { it.value }?.key,
         )
     }
+
+    /**
+     * Merges one fresh [tick] into a [running] per-sector total — count sums,
+     * max range takes the larger — so a caller can rebuild the exact same
+     * accumulate-forever shape [synthesizeAllTimeRow] expects, but sourced
+     * from an in-memory running total instead of a persisted table. Used for
+     * the Live coverage view, which must keep growing for as long as the app
+     * process is alive rather than resetting to whatever's currently tracked.
+     */
+    fun accumulateSectorTotals(running: List<SectorTotal>, tick: CoverageMetricsRow): List<SectorTotal> {
+        val byRunning = running.associateBy { it.sector }
+        return CompassSector.entries.map { sector ->
+            val prev = byRunning[sector]
+            val fresh = tick.sectors[sector]
+            SectorTotal(
+                sector = sector,
+                count = (prev?.count ?: 0) + (fresh?.count ?: 0),
+                maxMi = maxOf(prev?.maxMi ?: 0.0, fresh?.maxMi ?: 0.0),
+            )
+        }
+    }
+
+    /** Same accumulate-forever shape as [accumulateSectorTotals], for altitude-band counts. */
+    fun accumulateAltitudeCounts(running: Map<AltitudeBand, Int>, tick: CoverageMetricsRow): Map<AltitudeBand, Int> =
+        AltitudeBand.entries.associateWith { band -> (running[band] ?: 0) + (tick.altitudeCounts[band] ?: 0) }
 
     fun toCsvValues(row: CoverageMetricsRow, timestamps: CsvTimestamps): List<String> = buildList {
         add(timestamps.utc); add(timestamps.local); add(timestamps.zoneName); add(timestamps.utcOffset)

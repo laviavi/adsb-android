@@ -2,6 +2,7 @@ package com.laviavi.adsbandroid.ui.model
 
 import androidx.compose.runtime.Immutable
 import com.laviavi.adsbandroid.enrich.DataSource
+import com.laviavi.adsbandroid.enrich.OperatorKind
 
 @Immutable
 data class AircraftRowUi(
@@ -11,6 +12,8 @@ data class AircraftRowUi(
     val registration: String?,
     val registrationMark: DataSource?,
     val operator: String?,
+    /** Whether [operator] names an airline or just the registered owner. */
+    val operatorKind: OperatorKind?,
     val route: String?,
     val routeMark: DataSource?,
     val altitude: String,
@@ -20,6 +23,8 @@ data class AircraftRowUi(
     /** `mi` / `km` / `nm` — the column header carries the unit, the value does not. */
     val distanceUnit: String,
     val bearing: String,
+    /** Raw degrees behind [bearing]'s formatted text, for rotating the bearing arrow. */
+    val bearingDeg: Double?,
     val signalBars: Int,
     val messageCount: String,
     val age: String,

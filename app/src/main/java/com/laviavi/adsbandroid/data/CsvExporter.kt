@@ -23,7 +23,7 @@ object CsvExporter {
         return file
     }
 
-    private const val SEEN_HEADER = "icao,callsign,registration,aircraft_type,operator,route,altitude_ft," +
+    private const val SEEN_HEADER = "icao,callsign,registration,aircraft_type,operator,operator_kind,route,altitude_ft," +
         "ground_speed_kt,track_deg,latitude,longitude,distance_nm,squawk,message_count," +
         "first_seen,last_seen\n"
 
@@ -38,9 +38,14 @@ object CsvExporter {
         file.bufferedWriter().use { w ->
             w.write(SEEN_HEADER)
             for (r in rows) {
+                val operatorKind = when {
+                    r.operator == null -> ""
+                    r.operatorIsOwner -> "owner"
+                    else -> "airline"
+                }
                 w.write(
                     "${r.icao},${csv(r.callsign)},${csv(r.registration)},${csv(r.aircraftType)}," +
-                        "${csv(r.operator)},${csv(r.route)},${r.altitudeFt ?: ""},${r.groundSpeedKt ?: ""}," +
+                        "${csv(r.operator)},$operatorKind,${csv(r.route)},${r.altitudeFt ?: ""},${r.groundSpeedKt ?: ""}," +
                         "${r.trackDeg ?: ""},${r.latitudeDeg ?: ""},${r.longitudeDeg ?: ""}," +
                         "${r.distanceNm ?: ""},${csv(r.squawk)},${r.messageCount}," +
                         "${fmt.format(Date(r.firstSeenMs))},${fmt.format(Date(r.lastSeenMs))}\n",

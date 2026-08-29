@@ -1,34 +1,26 @@
 package com.laviavi.adsbandroid.ui.text
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.outlined.Usb
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,16 +37,14 @@ import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 
 /**
- * Top bar (tuner chip, title, Start/Stop, overflow) — the "live start section".
- * Split out of the old monolithic `LiveScreen` so [TrafficScreen] can place the
+ * Top bar (title, Start/Stop, overflow) — the "live start section". Split out
+ * of the old monolithic `LiveScreen` so [TrafficScreen] can place the
  * Live/History/Stats tab row underneath it, above the rest of Live's content.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveTopBar(
-    receiverStatus: ReceiverStatusUi,
     sourceState: SourceState,
-    onNavigateToReceiver: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onReconnect: () -> Unit,
@@ -73,33 +63,9 @@ fun LiveTopBar(
             .padding(horizontal = AdsbDimens.ScreenGutter),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Tuner chip
-        Surface(
-            modifier = Modifier.clickable(onClick = onNavigateToReceiver),
-            color = AdsbColors.SurfaceElevated,
-            shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
-            border = androidx.compose.foundation.BorderStroke(1.dp, AdsbColors.Outline),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(Icons.Outlined.Usb, contentDescription = null, modifier = Modifier.size(14.dp), tint = AdsbColors.Primary)
-                Text(
-                    text = receiverStatus.sourceName ?: "NO SDR",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    color = AdsbColors.Primary,
-                )
-            }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Text("Live", fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
-
-        Spacer(Modifier.weight(1f))
+        // Dongle identity now lives in the global StatusStrip above this bar
+        // (see MainActivity.kt) — showing it twice was the point Avi flagged.
+        Text("Live", fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary, modifier = Modifier.weight(1f))
 
         // Start/Stop button
         val isRunning = sourceState is SourceState.Running
@@ -171,67 +137,21 @@ fun LiveBody(
 ) {
     val rows by viewModel.aircraftRows.collectAsStateWithLifecycle()
     val trackedCount by viewModel.trackedCount.collectAsStateWithLifecycle()
-    val metrics by viewModel.liveMetrics.collectAsStateWithLifecycle()
-    val metricsCollapsed by viewModel.metricsCollapsed.collectAsStateWithLifecycle()
     val filters by viewModel.liveFilters.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
 
     Column(modifier = Modifier.fillMaxSize().background(AdsbColors.Background)) {
-        // Metrics header. The chevron sits outside the collapsing region so it is
-        // still reachable once collapsed — a toggle that hides itself is a trap.
-        if (sourceState is SourceState.Running) {
-            Column {
-                AnimatedVisibility(visible = !metricsCollapsed) {
-                    Column(modifier = Modifier.padding(horizontal = AdsbDimens.ScreenGutter, vertical = AdsbDimens.SpacingSm)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(AdsbDimens.SpacingSm), modifier = Modifier.fillMaxWidth()) {
-                            MetricTile(
-                                value = metrics.framesPerSecond, label = "frames/s",
-                                modifier = Modifier.weight(1f).clickable(onClick = onNavigateToReceiver),
-                            )
-                            MetricTile(
-                                value = "${metrics.validPercent}%", label = "valid",
-                                modifier = Modifier.weight(1f).clickable(onClick = onNavigateToReceiver),
-                                valueColor = AdsbColors.Success,
-                            )
-                            MetricTile(
-                                value = metrics.maxRangeMi, label = "Max Range(miles)",
-                                modifier = Modifier.weight(1f).clickable(onClick = onNavigateToReceiver),
-                            )
-                        }
-                        Sparkline(data = metrics.sparklineData, modifier = Modifier.padding(top = AdsbDimens.SpacingSm))
-                        Text(
-                            text = "frames/s · 60 s",
-                            fontSize = 10.sp,
-                            color = AdsbColors.TextDisabled,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                }
-                MetricsChevron(
-                    collapsed = metricsCollapsed,
-                    summary = "${metrics.framesPerSecond} frames/s · ${metrics.validPercent}% valid",
-                    onToggle = viewModel::toggleMetricsCollapsed,
-                )
-            }
-        }
-
-        FilterChipRow(
-            filters = filters,
-            // Distance only exists relative to an observer, and (0,0) is the
-            // "never configured" sentinel rather than a location anyone receives from.
-            observerKnown = config.observerLatitude != 0.0 || config.observerLongitude != 0.0,
-            onChange = viewModel::updateLiveFilters,
-        )
-
-        // Sort header bar
+        // Sort header bar — also carries the filter menu, so filtering costs zero
+        // space when nothing is filtered instead of a permanent chip row above it.
         if (rows.isNotEmpty() || sourceState is SourceState.Running) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 30.dp)
+                    .heightIn(min = 34.dp)
                     .background(AdsbColors.ListHeaderBg)
                     .padding(horizontal = AdsbDimens.ScreenGutter),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AdsbDimens.SpacingSm),
             ) {
                 Text(
                     text = when {
@@ -244,12 +164,16 @@ fun LiveBody(
                     fontSize = 10.sp,
                     letterSpacing = 1.sp,
                     color = AdsbColors.TextDisabled,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                FilterMenuButton(filters = filters, onChange = viewModel::updateLiveFilters)
                 SortDropdown(
                     current = config.sortOrder,
                     onPick = { onConfigChange(config.copy(sortOrder = it)) },
                 )
+            }
+            if (filters.isActive) {
+                ActiveFilterChips(filters = filters, onChange = viewModel::updateLiveFilters)
             }
         }
 
@@ -284,106 +208,94 @@ fun LiveBody(
     }
 }
 
-/** Collapse control for the metrics header; carries the numbers when collapsed. */
+/**
+ * Filter icon for the sort header row — outline and unbadged when nothing is
+ * filtered, so filtering costs zero permanent screen space; filled with a
+ * count badge once 1+ filters are on. Position/altitude/near-me are no longer
+ * exposed here (Avi asked for them gone) but stay on [LiveFilters] itself —
+ * only the UI surface for them was removed, not the filtering capability.
+ */
 @Composable
-private fun MetricsChevron(collapsed: Boolean, summary: String, onToggle: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(horizontal = AdsbDimens.ScreenGutter, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (collapsed) {
-            Text(
-                summary,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                color = AdsbColors.TextSecondary,
+private fun FilterMenuButton(filters: LiveFilters, onChange: ((LiveFilters) -> LiveFilters) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val activeCount = listOf(filters.airborne, filters.onGround, filters.emergency).count { it }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Outlined.FilterAlt,
+                contentDescription = if (activeCount > 0) "Filters, $activeCount active" else "Filters",
+                tint = if (activeCount > 0) AdsbColors.Primary else AdsbColors.TextDisabled,
+                modifier = Modifier.size(16.dp),
             )
         }
-        Spacer(Modifier.weight(1f))
-        Icon(
-            imageVector = if (collapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-            contentDescription = if (collapsed) "Expand metrics" else "Collapse metrics",
-            tint = AdsbColors.TextDisabled,
-            modifier = Modifier.size(18.dp),
-        )
+        if (activeCount > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(12.dp)
+                    .background(AdsbColors.Primary, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "$activeCount", fontSize = 8.sp, fontWeight = FontWeight.W700,
+                    color = AdsbColors.OnPrimary,
+                )
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            FilterMenuItem("Airborne", filters.airborne) { onChange { it.copy(airborne = !it.airborne) } }
+            FilterMenuItem("On ground", filters.onGround) { onChange { it.copy(onGround = !it.onGround) } }
+            FilterMenuItem("Emergency", filters.emergency) { onChange { it.copy(emergency = !it.emergency) } }
+        }
     }
 }
 
-/**
- * Filter chips. Chips AND together; the row scrolls horizontally rather than
- * wrapping, so the list below never shifts down as chips are added.
- */
 @Composable
-private fun FilterChipRow(
-    filters: LiveFilters,
-    observerKnown: Boolean,
-    onChange: ((LiveFilters) -> LiveFilters) -> Unit,
-) {
-    var bandMenuOpen by remember { mutableStateOf(false) }
+private fun FilterMenuItem(label: String, checked: Boolean, onToggle: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, color = if (checked) AdsbColors.Primary else AdsbColors.TextPrimary) },
+        leadingIcon = {
+            Icon(
+                if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                contentDescription = null,
+                tint = if (checked) AdsbColors.Primary else AdsbColors.TextSecondary,
+            )
+        },
+        onClick = onToggle,
+    )
+}
 
+/** Removable chips for whichever filters are active — the "what's on" view the icon alone can't give. */
+@Composable
+private fun ActiveFilterChips(filters: LiveFilters, onChange: ((LiveFilters) -> LiveFilters) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .background(AdsbColors.ListHeaderBg)
             .padding(horizontal = AdsbDimens.ScreenGutter, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        FilterPill("Airborne", filters.airborne) { onChange { it.copy(airborne = !it.airborne) } }
-        FilterPill("On ground", filters.onGround) { onChange { it.copy(onGround = !it.onGround) } }
-        FilterPill("Position", filters.withPosition) { onChange { it.copy(withPosition = !it.withPosition) } }
-        FilterPill("Emergency", filters.emergency) { onChange { it.copy(emergency = !it.emergency) } }
-        FilterPill("< 50 mi", filters.within50Mi, enabled = observerKnown) {
-            onChange { it.copy(within50Mi = !it.within50Mi) }
-        }
-        Box {
-            FilterPill(filters.altitudeBand.label, filters.altitudeBand != AltitudeBand.ANY) {
-                bandMenuOpen = true
-            }
-            DropdownMenu(expanded = bandMenuOpen, onDismissRequest = { bandMenuOpen = false }) {
-                AltitudeBand.entries.forEach { band ->
-                    DropdownMenuItem(
-                        text = { Text(if (band == AltitudeBand.ANY) "Any altitude" else band.label) },
-                        onClick = { bandMenuOpen = false; onChange { it.copy(altitudeBand = band) } },
-                    )
-                }
-            }
-        }
+        if (filters.airborne) ActiveChip("Airborne") { onChange { it.copy(airborne = false) } }
+        if (filters.onGround) ActiveChip("On ground") { onChange { it.copy(onGround = false) } }
+        if (filters.emergency) ActiveChip("Emergency") { onChange { it.copy(emergency = false) } }
     }
 }
 
 @Composable
-private fun FilterPill(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    val textColor = when {
-        !enabled -> AdsbColors.TextDisabled
-        selected -> AdsbColors.OnPrimary
-        else -> AdsbColors.TextSecondary
-    }
-    val isSelected = selected
+private fun ActiveChip(label: String, onRemove: () -> Unit) {
     Surface(
-        modifier = Modifier
-            .alpha(if (enabled) 1f else 0.5f)
-            .clickable(enabled = enabled, onClick = onClick)
-            .semantics { this.selected = isSelected },
-        color = if (selected) AdsbColors.Primary else Color.Transparent,
+        modifier = Modifier.clickable(onClick = onRemove),
+        color = AdsbColors.Primary,
         shape = RoundedCornerShape(AdsbDimens.PillCornerRadius),
-        border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, AdsbColors.Outline),
     ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.W600 else FontWeight.Normal,
-            color = textColor,
-            maxLines = 1,
-        )
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(label, fontSize = 11.sp, fontWeight = FontWeight.W600, color = AdsbColors.OnPrimary)
+            Icon(Icons.Default.Close, contentDescription = "Remove", tint = AdsbColors.OnPrimary, modifier = Modifier.size(12.dp))
+        }
     }
 }
 
@@ -436,29 +348,14 @@ private fun AircraftRowWithMenu(
     onShowOnMap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
-
-    Box(modifier = modifier) {
-        AircraftRow(
-            row = row,
+    AircraftRow(
+        row = row,
+        onClick = onClick,
+        modifier = modifier.combinedClickable(
             onClick = onClick,
-            modifier = Modifier.combinedClickable(
-                onClick = onClick,
-                onLongClick = { menuOpen = true },
-            ),
-        )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(
-                text = { Text("Show on map") },
-                onClick = { menuOpen = false; onShowOnMap() },
-            )
-            DropdownMenuItem(
-                text = { Text("Copy ICAO") },
-                onClick = { menuOpen = false; clipboard.setText(AnnotatedString(row.icao)) },
-            )
-        }
-    }
+            onLongClick = onShowOnMap,
+        ),
+    )
 }
 
 @Composable

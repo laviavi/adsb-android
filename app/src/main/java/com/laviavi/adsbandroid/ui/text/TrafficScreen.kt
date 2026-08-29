@@ -55,7 +55,6 @@ fun TrafficScreen(
 ) {
     val history by viewModel.history.collectAsStateWithLifecycle()
     val visits by viewModel.visits.collectAsStateWithLifecycle()
-    val receiverStatus by viewModel.receiverStatus.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
 
     val pagerState = rememberPagerState { TrafficTab.entries.size }
@@ -63,9 +62,7 @@ fun TrafficScreen(
 
     Column(modifier = Modifier.fillMaxSize().background(AdsbColors.Background)) {
         LiveTopBar(
-            receiverStatus = receiverStatus,
             sourceState = sourceState,
-            onNavigateToReceiver = onNavigateToReceiver,
             onStart = onStart,
             onStop = onStop,
             onReconnect = onReconnect,

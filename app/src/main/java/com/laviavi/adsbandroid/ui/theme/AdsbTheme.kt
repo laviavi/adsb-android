@@ -46,20 +46,6 @@ object AdsbDimens {
     val StatusStripHeight     = 40.dp
     val AircraftRowHeight     = 72.dp
 
-    /**
-     * Live-row right-hand data block. Fixed tracks, not content-sized, so every
-     * row's block has the same width and x-position and the three columns read as
-     * straight lines down the list.
-     *
-     * Each track is the widest real value at 13 sp monospace plus ~2 dp slack —
-     * `22.7` / `↓8200` (the arrow is wider than a digit) / `073°`. They are not
-     * derived from the header text, which is a different size and weight.
-     */
-    val DataColDist           = 44.dp
-    val DataColAlt            = 58.dp
-    val DataColTrack          = 42.dp
-    val DataColumnGap         = 6.dp
-
     /** Identity column ↔ data block. Owned by the Row, never consumed by either side. */
     val RowGutter             = 12.dp
     val CardCornerRadius      = 12.dp

@@ -44,3 +44,15 @@ fun ExitConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** Confirms before clearing all-time coverage — irreversible, unlike Live which resets on its own each app launch. */
+@Composable
+fun ResetCoverageConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reset all-time coverage?") },
+        text = { Text("Every session's accumulated coverage data is cleared. This can't be undone.") },
+        confirmButton = { TextButton(onClick = { onDismiss(); onConfirm() }) { Text("Reset") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

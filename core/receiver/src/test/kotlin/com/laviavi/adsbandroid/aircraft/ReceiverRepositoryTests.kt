@@ -128,6 +128,38 @@ class ReceiverRepositoryTests {
         assertTrue(repo.aircraft.value.isEmpty())
     }
 
+    @Test fun `reset reports still-tracked aircraft via onDeparted before clearing them`() = runTest {
+        val departedIcaos = mutableListOf<String>()
+        val repo = ReceiverRepository(
+            scope = backgroundScope,
+            sortOrderProvider = { AircraftSortOrder.FIRST_SEEN },
+            expirySecondsProvider = { 60 },
+            onDeparted = { departed -> departedIcaos += departed.map { it.icao } },
+            dispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
+        )
+        repo.start()
+        repo.offer(listOf(decode(VALID_DF17), decode(VALID_DF17_2)))
+        advanceTimeBy(1)
+        repo.reset()
+
+        assertEquals(setOf("4840D6", "C07B6E"), departedIcaos.toSet())
+    }
+
+    @Test fun `reset on an empty table does not call onDeparted`() = runTest {
+        var departedCalls = 0
+        val repo = ReceiverRepository(
+            scope = backgroundScope,
+            sortOrderProvider = { AircraftSortOrder.FIRST_SEEN },
+            expirySecondsProvider = { 60 },
+            onDeparted = { departedCalls++ },
+            dispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
+        )
+        repo.start()
+        repo.reset()
+
+        assertEquals(0, departedCalls)
+    }
+
     @Test fun `publishNow reflects a sort-order change immediately`() = runTest {
         var order = AircraftSortOrder.FIRST_SEEN
         val repo = ReceiverRepository(

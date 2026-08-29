@@ -2,6 +2,7 @@ package com.laviavi.adsbandroid.aircraft
 
 import com.laviavi.adsbandroid.enrich.DataSource
 import com.laviavi.adsbandroid.enrich.OfflineEnrichment
+import com.laviavi.adsbandroid.enrich.OperatorKind
 import com.laviavi.adsbandroid.crc.CrcChecker
 import com.laviavi.adsbandroid.decoder.*
 import kotlin.math.log10
@@ -354,13 +355,19 @@ class AircraftManager(expirySeconds: Int = 60, var decoder: MessageDecoder? = nu
 
         var operator = state.operator
         var operatorSource = state.operatorSource
+        var operatorKind = state.operatorKind
         if (offline.operator != null && offline.operatorSource.betterThanOrNew(operatorSource)) {
             operator = offline.operator
             operatorSource = offline.operatorSource
+            operatorKind = offline.operatorKind
         }
+        // db (the legacy bundled-lookup table) has no way to say whether its operator
+        // name is an airline or an owner, so it's treated as OWNER — the same
+        // conservative default setAircraftMeta uses for the same reason.
         if (db?.operator != null && DataSource.DATABASE.betterThan(operatorSource)) {
             operator = db.operator
             operatorSource = DataSource.DATABASE
+            operatorKind = OperatorKind.OWNER
         }
 
         return state.copy(
@@ -368,6 +375,7 @@ class AircraftManager(expirySeconds: Int = 60, var decoder: MessageDecoder? = nu
             registrationSource = registrationSource,
             operator = operator,
             operatorSource = operatorSource,
+            operatorKind = operatorKind,
             aircraftType = state.aircraftType ?: db?.aircraftType,
         )
     }
@@ -382,20 +390,37 @@ class AircraftManager(expirySeconds: Int = 60, var decoder: MessageDecoder? = nu
         }
     }
 
-    /** Patch in metadata (registration, owner, display type) from a network enrichment source. */
+    /**
+     * Patch in metadata (registration, owner, display type) from a network enrichment
+     * source — typically the global aircraft mirror, i.e. FAA-style registry data.
+     *
+     * [owner] is the *registered owner*, not necessarily who operates the aircraft — a
+     * leased/financed airliner is routinely registered to a trust bank. It only ever
+     * fills [AircraftState.operator] when no airline name is already known there
+     * (`operatorKind != AIRLINE`); it must never overwrite one, regardless of which
+     * arrived first — see [setFaResult] and `OfflineEnrichment.enrich`, the two
+     * sources that actually represent an airline.
+     */
     fun setAircraftMeta(icaoHex: String, registration: String?, owner: String?, typeDisplay: String?) {
         table[icaoHex]?.let { existing ->
+            val useOwner = owner != null && existing.operatorKind != OperatorKind.AIRLINE
             table[icaoHex] = existing.copy(
                 registration = registration ?: existing.registration,
                 registrationSource = if (registration != null) DataSource.NETWORK else existing.registrationSource,
-                operator = owner ?: existing.operator,
-                operatorSource = if (owner != null) DataSource.NETWORK else existing.operatorSource,
+                operator = if (useOwner) owner else existing.operator,
+                operatorSource = if (useOwner) DataSource.NETWORK else existing.operatorSource,
+                operatorKind = if (useOwner) OperatorKind.OWNER else existing.operatorKind,
                 aircraftType = typeDisplay ?: existing.aircraftType,
             )
         }
     }
 
-    /** Patch in FA scrape result (route, airline, type) resolved asynchronously. */
+    /**
+     * Patch in FA scrape result (route, airline, type) resolved asynchronously.
+     * [airlineName] is FlightAware's own resolved operating carrier — an actual
+     * airline, not a registry lookup — so per the original design ("FlightAware
+     * scrape overrides all other sources for airline"), it always wins outright.
+     */
     fun setFaResult(icaoHex: String, route: String?, airlineName: String?, typeDisplay: String?) {
         table[icaoHex]?.let { existing ->
             table[icaoHex] = existing.copy(
@@ -403,6 +428,7 @@ class AircraftManager(expirySeconds: Int = 60, var decoder: MessageDecoder? = nu
                 routeSource = if (route != null) DataSource.NETWORK else existing.routeSource,
                 operator = airlineName ?: existing.operator,
                 operatorSource = if (airlineName != null) DataSource.NETWORK else existing.operatorSource,
+                operatorKind = if (airlineName != null) OperatorKind.AIRLINE else existing.operatorKind,
                 aircraftType = typeDisplay ?: existing.aircraftType,
             )
         }

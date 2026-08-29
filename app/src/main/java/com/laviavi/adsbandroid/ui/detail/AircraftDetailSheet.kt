@@ -19,6 +19,7 @@ import com.laviavi.adsbandroid.aircraft.AircraftState
 import com.laviavi.adsbandroid.aircraft.MessageSummary
 import com.laviavi.adsbandroid.crc.CrcChecker
 import com.laviavi.adsbandroid.data.AircraftEventLogEntity
+import com.laviavi.adsbandroid.enrich.OperatorKind
 import com.laviavi.adsbandroid.ui.components.FreshnessDot
 import com.laviavi.adsbandroid.ui.model.AgeTier
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
@@ -74,7 +75,9 @@ fun AircraftDetailSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 aircraft.registration?.let { InfoChip(it) }
                 aircraft.aircraftType?.let { InfoChip(it) }
-                aircraft.operator?.let { InfoChip(it) }
+                aircraft.operator?.let {
+                    InfoChip(if (aircraft.operatorKind == OperatorKind.OWNER) "$it (owner)" else it)
+                }
             }
         }
 

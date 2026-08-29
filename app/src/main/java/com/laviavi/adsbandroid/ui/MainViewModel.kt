@@ -69,6 +69,7 @@ class MainViewModel @Inject constructor() : ViewModel() {
     fun onBestRangeEver(record: com.laviavi.adsbandroid.data.BestRangeRecordEntity?) { _bestRangeEver.value = record }
 
     private val _sessionMaxRangeNm = MutableStateFlow<Double?>(null)
+    val sessionMaxRangeNm: StateFlow<Double?> = _sessionMaxRangeNm.asStateFlow()
     fun onSessionMaxRange(distanceNm: Double?) { _sessionMaxRangeNm.value = distanceNm }
 
     /** Which metric the coverage polar plots. Presentation-only, not persisted. */
@@ -101,8 +102,6 @@ class MainViewModel @Inject constructor() : ViewModel() {
         _liveFilters.value = transform(_liveFilters.value)
     }
 
-    private val _sparklineBuffer = ArrayDeque<Float>(60)
-
     /**
      * Filtering happens before mapping, so a chip that hides most of the list also
      * saves the formatting work for those rows — the mapper is the expensive half.
@@ -113,7 +112,7 @@ class MainViewModel @Inject constructor() : ViewModel() {
             val now = System.currentTimeMillis()
             list.asSequence()
                 .filter { LiveFilters.matches(it, filters) }
-                .map { UiMapper.mapRow(it, now, cfg.distanceUnit) }
+                .map { UiMapper.mapRow(it, now, cfg.distanceUnit, cfg.aircraftExpirySeconds) }
                 .toList()
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -125,17 +124,10 @@ class MainViewModel @Inject constructor() : ViewModel() {
     /** 2 Hz per the spec's decoupling requirement — the map never sees the 4 Hz list rate. */
     val mapMarkers: StateFlow<List<MapMarker>> = combine(_aircraft, _config) { list, cfg ->
         val now = System.currentTimeMillis()
-        list.mapNotNull { UiMapper.mapMarker(it, now, cfg.distanceUnit, cfg.mapTrailLength) }
+        list.mapNotNull { UiMapper.mapMarker(it, now, cfg.distanceUnit, cfg.mapTrailLength, cfg.aircraftExpirySeconds, cfg.mapLabelFields) }
     }.flowOn(Dispatchers.Default)
         .sample(500)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val liveMetrics: StateFlow<LiveMetrics> = combine(_aircraft, _stats, _config) { acList, snapshot, cfg ->
-        Triple(acList, snapshot, cfg)
-    }.combine(_sessionMaxRangeNm) { (acList, snapshot, cfg), maxRangeNm ->
-        val sparkline = synchronized(_sparklineBuffer) { _sparklineBuffer.toList() }
-        UiMapper.mapMetrics(acList, snapshot, sparkline.map { it }, cfg, maxRangeNm)
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LiveMetrics())
 
     val receiverStatus: StateFlow<ReceiverStatusUi> = combine(_sourceState, _stats) { state, snapshot ->
         UiMapper.mapReceiverStatus(state, snapshot)
@@ -165,10 +157,6 @@ class MainViewModel @Inject constructor() : ViewModel() {
         icao?.let { id -> list.find { it.icao == id } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    private val _metricsCollapsed = MutableStateFlow(false)
-    val metricsCollapsed: StateFlow<Boolean> = _metricsCollapsed.asStateFlow()
-    fun toggleMetricsCollapsed() { _metricsCollapsed.value = !_metricsCollapsed.value }
-
     // --- Service callbacks ---
 
     fun onHistoryUpdate(list: List<AircraftSeenEntity>) { _history.value = list }
@@ -184,10 +172,6 @@ class MainViewModel @Inject constructor() : ViewModel() {
     }
     fun onStatsUpdate(snapshot: PipelineStats.Snapshot) {
         _stats.value = snapshot
-        synchronized(_sparklineBuffer) {
-            _sparklineBuffer.addLast(snapshot.messagesPerSecond.toFloat())
-            while (_sparklineBuffer.size > 60) _sparklineBuffer.removeFirst()
-        }
     }
     fun onServiceConnected(connected: Boolean) { _serviceConnected.value = connected }
     fun onSourceState(state: SourceState) {

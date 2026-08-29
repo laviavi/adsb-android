@@ -28,6 +28,7 @@ import com.laviavi.adsbandroid.data.AircraftSeenEntity
 import com.laviavi.adsbandroid.data.AircraftHistoryEntity
 import com.laviavi.adsbandroid.data.AircraftVisitDao
 import com.laviavi.adsbandroid.data.AircraftVisitEntity
+import com.laviavi.adsbandroid.data.AltitudeSampleEntity
 import com.laviavi.adsbandroid.data.BestRangeRecordEntity
 import com.laviavi.adsbandroid.data.CoverageSampleEntity
 import com.laviavi.adsbandroid.data.EnrichmentCacheDao
@@ -35,10 +36,12 @@ import com.laviavi.adsbandroid.data.FlightAwareEnrichment
 import com.laviavi.adsbandroid.data.typeDisplay
 import com.laviavi.adsbandroid.data.RouteEnrichment
 import com.laviavi.adsbandroid.enrich.Airlines
+import com.laviavi.adsbandroid.enrich.OperatorKind
 import com.laviavi.adsbandroid.location.GpsPolicy
 import com.laviavi.adsbandroid.location.GpsThrottlePolicy
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.location.ObserverPositionResolver
+import com.laviavi.adsbandroid.observability.AltitudeBand
 import com.laviavi.adsbandroid.observability.CompassSector
 import com.laviavi.adsbandroid.observability.CoverageMetrics
 import com.laviavi.adsbandroid.observability.MessageCounters
@@ -71,6 +74,7 @@ class PipelineService : Service() {
     @Inject lateinit var seenDao: AircraftSeenDao
     @Inject lateinit var visitDao: AircraftVisitDao
     @Inject lateinit var coverageSampleDao: com.laviavi.adsbandroid.data.CoverageSampleDao
+    @Inject lateinit var altitudeSampleDao: com.laviavi.adsbandroid.data.AltitudeSampleDao
     @Inject lateinit var bestRangeDao: com.laviavi.adsbandroid.data.BestRangeDao
     @Inject lateinit var enrichmentDao: EnrichmentCacheDao
     @Inject lateinit var aircraftMetaCacheDao: AircraftMetaCacheDao
@@ -161,6 +165,18 @@ class PipelineService : Service() {
     private val sessionLock = kotlinx.coroutines.sync.Mutex()
     private val lastHistoryInsertMs = HashMap<String, Long>()
     private var lastNotificationText = "Starting…"
+
+    /**
+     * Running per-sector coverage total for the Live coverage view — deliberately
+     * NOT touched by [clearSessionState], so a dongle reconnect never resets it.
+     * Lives only as long as this service (i.e. the app process) does; a fresh
+     * process start gives a fresh empty list, matching "resets only when the app
+     * is closed and reopened."
+     */
+    private var liveSectorTotals: List<SectorTotal> = emptyList()
+
+    /** Same lifetime/reset rules as [liveSectorTotals], for the Live altitude histogram. */
+    private var liveAltitudeCounts: Map<AltitudeBand, Int> = emptyMap()
 
     val aircraft: StateFlow<List<AircraftState>> = receiverRepository.aircraft
 
@@ -514,14 +530,28 @@ class PipelineService : Service() {
         // The Receiver coverage card refreshes far faster than the 5-minute CSV
         // row: the CSV is a long-run record, this is a live instrument. Same
         // computation, different cadence — the CSV cadence is not changed.
+        //
+        // Each tick merges into liveSectorTotals rather than replacing _coverage
+        // outright — a plain per-tick snapshot forgot every sector the moment its
+        // aircraft left range or the dongle reconnected. Merging instead means
+        // Live keeps everything seen since the app process started.
         serviceScope.launch {
             while (true) {
                 delay(COVERAGE_UI_INTERVAL_MS)
-                _coverage.value = CoverageMetrics.computeRow(
+                val tick = CoverageMetrics.computeRow(
                     currentConfig.observerLatitude,
                     currentConfig.observerLongitude,
                     currentPositionedAircraft(),
                 )
+                if (tick != null) {
+                    liveSectorTotals = CoverageMetrics.accumulateSectorTotals(liveSectorTotals, tick)
+                    liveAltitudeCounts = CoverageMetrics.accumulateAltitudeCounts(liveAltitudeCounts, tick)
+                }
+                _coverage.value = liveSectorTotals.takeIf { it.isNotEmpty() }?.let {
+                    CoverageMetrics.synthesizeAllTimeRow(
+                        it, currentConfig.observerLatitude, currentConfig.observerLongitude, liveAltitudeCounts,
+                    )
+                }
             }
         }
     }
@@ -552,8 +582,12 @@ class PipelineService : Service() {
                 count = s.count, maxMi = s.maxMi, medianSignalDbfs = s.medianSignalDbfs,
             )
         }
-        if (samples.isEmpty()) return
-        runCatching { coverageSampleDao.insertAll(samples) }
+        val altitudeSamples = row.altitudeCounts.filterValues { it > 0 }.map { (band, count) ->
+            AltitudeSampleEntity(timestampMs = now, band = band.name, count = count)
+        }
+        if (samples.isNotEmpty()) runCatching { coverageSampleDao.insertAll(samples) }
+        if (altitudeSamples.isNotEmpty()) runCatching { altitudeSampleDao.insertAll(altitudeSamples) }
+        if (samples.isEmpty() && altitudeSamples.isEmpty()) return
         refreshAllTimeCoverage()
     }
 
@@ -562,9 +596,29 @@ class PipelineService : Service() {
         val sectorTotals = totals.mapNotNull { agg ->
             runCatching { CompassSector.valueOf(agg.sector) }.getOrNull()?.let { SectorTotal(it, agg.count, agg.maxMi) }
         }
+        val altitudeTotals = runCatching { altitudeSampleDao.allTimeByBand() }.getOrNull().orEmpty().mapNotNull { agg ->
+            runCatching { AltitudeBand.valueOf(agg.band) }.getOrNull()?.let { it to agg.count }
+        }.toMap()
         _allTimeCoverage.value = CoverageMetrics.synthesizeAllTimeRow(
-            sectorTotals, currentConfig.observerLatitude, currentConfig.observerLongitude,
+            sectorTotals, currentConfig.observerLatitude, currentConfig.observerLongitude, altitudeTotals,
         )
+    }
+
+    /**
+     * Explicit user action — Avi's call, per §61: all-time coverage persists
+     * across every app run forever, unless he resets it himself. Sets
+     * `_allTimeCoverage` to null directly rather than routing through
+     * [refreshAllTimeCoverage] — an empty `coverage_samples` table still
+     * produces a valid (if all-zero) [CoverageMetricsRow] from
+     * `synthesizeAllTimeRow`, which would show a degenerate chart instead of
+     * the Receiver screen's existing "No coverage history yet" empty state.
+     */
+    fun resetAllTimeCoverage() {
+        serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { coverageSampleDao.clearAll() }
+            runCatching { altitudeSampleDao.clearAll() }
+            _allTimeCoverage.value = null
+        }
     }
 
     /** Not per-message by design — a personal best doesn't need per-fix precision, and this avoids a DB round-trip on every decoded position. */
@@ -958,6 +1012,7 @@ class PipelineService : Service() {
                         callsign      = s.callsign?.trim()?.takeIf { it.isNotEmpty() },
                         registration  = s.registration,
                         operator      = s.operator,
+                        operatorIsOwner = s.operatorKind == OperatorKind.OWNER,
                         aircraftType  = s.aircraftType,
                         route         = s.route,
                         altitudeFt    = s.altitudeFt,
@@ -983,8 +1038,7 @@ class PipelineService : Service() {
                         registration  = s.registration,
                         operator      = s.operator,
                         aircraftType  = s.aircraftType,
-                        isAirline     = Airlines.fromCallsign(s.callsign) != null ||
-                            Airlines.matchesKnownAirlineName(s.operator),
+                        isAirline     = s.operatorKind == OperatorKind.AIRLINE,
                         firstSeenMs   = s.firstSeenMs,
                         lastSeenMs    = s.lastSeenMs,
                         messageCount  = s.messageCount,

@@ -23,14 +23,18 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The Live row's right-hand data block is a layout contract, not a matter of taste:
- * the three columns must read as straight lines down the whole list, and under width
- * pressure the identity text must be what gives way — never the numbers, and never
- * the gap between them.
+ * The Live row's right-hand data block is content-width, not the old fixed-dp
+ * tracks (§58's redesign traded column-to-column left-edge alignment for a
+ * block that spans the row's full height instead of only its top two lines) —
+ * so what's still a real contract is narrower than before: every row must be
+ * the same height, the data block's right edge must land at the same x on
+ * every row (it's the row's trailing edge), and the gutter between identity
+ * and the data block must survive under width pressure — the identity text
+ * truncates instead of ever invading it.
  *
  * Asserted by measurement rather than by looking at a screenshot, because the
- * failure mode is a few pixels of stagger that is invisible in one row and obvious
- * in twenty.
+ * failure mode is a few pixels of stagger that is invisible in one row and
+ * obvious in twenty.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -44,29 +48,29 @@ class AircraftRowLayoutTests {
         row(
             icao = "A4B1C2", callsign = "UAL2184", type = "B738",
             registration = "N38901", operator = "United Airlines", route = "LAX → EWR",
-            altitude = "FL350", vs = VsArrow.UP, distance = "14.2", bearing = "073°",
+            altitude = "FL350", vs = VsArrow.UP, distance = "14.2", bearing = "073°", bearingDeg = 73.0,
         ),
         // A four-digit altitude with a down arrow is wider than `FL350`: this is the
-        // row that staggers the column if the tracks are content-sized.
+        // row that would stagger a content-sized block if it were left-aligned.
         row(
             icao = "3C6444", callsign = "DLH441", type = "A359",
             registration = "D-AIXA", operator = "Lufthansa", route = "FRA → LAX",
-            altitude = "8200", vs = VsArrow.DOWN, distance = "22.7", bearing = "318°",
+            altitude = "8200", vs = VsArrow.DOWN, distance = "22.7", bearing = "318°", bearingDeg = 318.0,
         ),
         // No enrichment at all — the shortest identity text, which is where a
-        // content-sized block would drift furthest right.
+        // ragged block would drift furthest from its neighbours.
         row(
             icao = "A91B03", callsign = null, type = null,
             registration = null, operator = null, route = null,
-            altitude = "—", vs = VsArrow.UNKNOWN, distance = "—", bearing = "—",
+            altitude = "—", vs = VsArrow.UNKNOWN, distance = "—", bearing = "—", bearingDeg = null,
         ),
     )
 
     @Test
-    fun `columns align and the data block holds its width at 411 dp`() = assertLayout(411.dp)
+    fun `rows align and hold their height at 411 dp`() = assertLayout(411.dp)
 
     @Test
-    fun `columns align and the data block holds its width at 360 dp`() = assertLayout(360.dp)
+    fun `rows align and hold their height at 360 dp`() = assertLayout(360.dp)
 
     private fun assertLayout(screenWidth: Dp) {
         rule.setContent {
@@ -85,30 +89,18 @@ class AircraftRowLayoutTests {
             .map { it.unclippedBoundsInRoot().left }
         fun rights(tag: String) = rule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes()
             .map { it.unclippedBoundsInRoot().right }
-        fun widths(tag: String) = rule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes()
-            .map { it.unclippedBoundsInRoot().width }
 
-        // (a) every row puts each data column at the same x, to the pixel.
-        listOf(AircraftRowTags.DIST, AircraftRowTags.ALT, AircraftRowTags.TRACK).forEach { tag ->
-            val xs = lefts(tag)
-            assertEquals("expected one $tag per row", samples.size, xs.size)
-            assertEquals("$tag staggers across rows at $screenWidth: $xs", 1, xs.distinct().size)
-        }
-
-        // The tracks are literals, so their widths do not depend on the content.
-        assertEquals(
-            listOf(AdsbDimens.DataColDist, AdsbDimens.DataColAlt, AdsbDimens.DataColTrack)
-                .map { with(density) { it.roundToPx() } },
-            listOf(AircraftRowTags.DIST, AircraftRowTags.ALT, AircraftRowTags.TRACK)
-                .map { widths(it).distinct().single().toInt() },
-        )
+        // (a) the data block's right edge — the row's trailing edge — lands at the
+        // same x on every row, regardless of how wide its content happens to be.
+        val blockRights = rights(AircraftRowTags.DATA_BLOCK)
+        assertEquals("expected one data block per row", samples.size, blockRights.size)
+        assertEquals("data block right edge staggers across rows at $screenWidth: $blockRights", 1, blockRights.distinct().size)
 
         // (b) every row is the same height. Stated as equality rather than as
         // "<= 72 dp" on purpose: Robolectric's text engine is a stub and reports
         // its own line heights, so an absolute dp assertion here would be measuring
         // the stub, not the layout. Equality still catches the failure that matters
-        // — one row's cell wrapping while its neighbours' do not. The absolute 72 dp
-        // is a device check.
+        // — one row's cell wrapping while its neighbours' do not.
         val heights = rule.onAllNodesWithTag(AircraftRowTags.IDENTITY, useUnmergedTree = true)
             .fetchSemanticsNodes()
             .map { it.layoutInfo.coordinates.parentLayoutCoordinates!!.size.height }
@@ -116,10 +108,10 @@ class AircraftRowLayoutTests {
 
         // (c) the gutter survives at every width — the identity text truncates instead.
         val gutterPx = with(density) { AdsbDimens.RowGutter.toPx() }
-        rights(AircraftRowTags.IDENTITY).zip(lefts(AircraftRowTags.DIST)).forEach { (idRight, distLeft) ->
+        rights(AircraftRowTags.IDENTITY).zip(lefts(AircraftRowTags.DATA_BLOCK)).forEach { (idRight, blockLeft) ->
             assertTrue(
-                "gutter ${distLeft - idRight}px < required ${gutterPx}px at $screenWidth",
-                distLeft - idRight >= gutterPx - 1f,
+                "gutter ${blockLeft - idRight}px < required ${gutterPx}px at $screenWidth",
+                blockLeft - idRight >= gutterPx - 1f,
             )
         }
     }
@@ -135,6 +127,7 @@ class AircraftRowLayoutTests {
         vs: VsArrow,
         distance: String,
         bearing: String,
+        bearingDeg: Double?,
     ) = AircraftRowUi(
         icao = icao,
         callsign = callsign,
@@ -142,6 +135,7 @@ class AircraftRowLayoutTests {
         registration = registration,
         registrationMark = registration?.let { DataSource.ALGORITHMIC },
         operator = operator,
+        operatorKind = operator?.let { com.laviavi.adsbandroid.enrich.OperatorKind.AIRLINE },
         route = route,
         routeMark = route?.let { DataSource.NETWORK },
         altitude = altitude,
@@ -150,6 +144,7 @@ class AircraftRowLayoutTests {
         distance = distance,
         distanceUnit = "mi",
         bearing = bearing,
+        bearingDeg = bearingDeg,
         signalBars = 2,
         messageCount = "126 msgs",
         age = "2s",

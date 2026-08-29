@@ -39,6 +39,8 @@ data class AircraftSeenEntity(
     val callsign: String?,
     val registration: String?,
     val operator: String?,
+    /** True when [operator] is only the registered owner, not a confirmed airline. */
+    val operatorIsOwner: Boolean = false,
     val aircraftType: String?,
     val route: String?,
     val altitudeFt: Int?,
@@ -86,7 +88,7 @@ data class AircraftVisitEntity(
     val registration: String?,
     val operator: String?,
     val aircraftType: String?,
-    /** True only when [operator] resolved from the callsign prefix (`Airlines.fromCallsign`, ALGORITHMIC) — see `OfflineEnrichment.enrich`. Everything else counts as private. */
+    /** True only when [operator] is a confirmed airline name (`AircraftState.operatorKind == OperatorKind.AIRLINE`) — from the callsign prefix or a FlightAware scrape, never a bare registry owner. See `AircraftManager.setAircraftMeta`/`setFaResult`. */
     val isAirline: Boolean,
     val firstSeenMs: Long,
     val lastSeenMs: Long,
@@ -128,6 +130,36 @@ data class SectorAggregate(val sector: String, val count: Int, val maxMi: Double
 
     @Query("SELECT sector, SUM(count) as count, MAX(maxMi) as maxMi FROM coverage_samples GROUP BY sector")
     suspend fun allTimeBySector(): List<SectorAggregate>
+
+    @Query("DELETE FROM coverage_samples")
+    suspend fun clearAll()
+}
+
+/**
+ * One row per altitude band per 5-minute coverage tick, written only when that
+ * band actually saw traffic — the all-time counterpart to [CoverageMetricsRow.altitudeCounts],
+ * which `coverage_samples` alone has no room for. Powers the Receiver tab's
+ * all-time altitude histogram the same way [CoverageSampleEntity] powers its polar.
+ */
+@Entity(tableName = "altitude_samples", indices = [Index("band")])
+data class AltitudeSampleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestampMs: Long,
+    val band: String,
+    val count: Int,
+)
+
+data class AltitudeAggregate(val band: String, val count: Int)
+
+@Dao interface AltitudeSampleDao {
+    @Insert
+    suspend fun insertAll(samples: List<AltitudeSampleEntity>)
+
+    @Query("SELECT band, SUM(count) as count FROM altitude_samples GROUP BY band")
+    suspend fun allTimeByBand(): List<AltitudeAggregate>
+
+    @Query("DELETE FROM altitude_samples")
+    suspend fun clearAll()
 }
 
 /** Singleton row (id always 0) holding the single furthest contact ever decoded. */
@@ -290,12 +322,13 @@ data class GlobalAircraftImportEntity(
         AircraftMetaCacheEntity::class,
         AircraftVisitEntity::class,
         CoverageSampleEntity::class,
+        AltitudeSampleEntity::class,
         BestRangeRecordEntity::class,
         AircraftEventLogEntity::class,
         GlobalAircraftEntity::class,
         GlobalAircraftImportEntity::class,
     ],
-    version = 10,
+    version = 12,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftHistoryDao(): AircraftHistoryDao
@@ -304,6 +337,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun aircraftMetaCacheDao(): AircraftMetaCacheDao
     abstract fun aircraftVisitDao(): AircraftVisitDao
     abstract fun coverageSampleDao(): CoverageSampleDao
+    abstract fun altitudeSampleDao(): AltitudeSampleDao
     abstract fun bestRangeDao(): BestRangeDao
     abstract fun aircraftEventLogDao(): AircraftEventLogDao
     abstract fun globalAircraftDao(): GlobalAircraftDao
@@ -343,6 +377,30 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
 val MIGRATION_9_10 = object : Migration(9, 10) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `global_aircraft_import` ADD COLUMN `errorMessage` TEXT")
+    }
+}
+
+/** v10 -> v11: added `aircraft_seen.operatorIsOwner` — distinguishes a registered-owner value from a confirmed airline name in History and its CSV export. */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `aircraft_seen` ADD COLUMN `operatorIsOwner` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+/** v11 -> v12: added `altitude_samples`, the all-time counterpart to `coverage_samples` that lets the Receiver tab's all-time altitude histogram show real data instead of always-zero. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `altitude_samples` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `timestampMs` INTEGER NOT NULL,
+                `band` TEXT NOT NULL,
+                `count` INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_altitude_samples_band` ON `altitude_samples` (`band`)")
     }
 }
 

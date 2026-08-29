@@ -132,6 +132,7 @@ class MainActivity : ComponentActivity() {
                         pipelineService?.checkGlobalDbStatus(onResult) ?: onResult("Pipeline service not connected.")
                     },
                     onResetCounters = { pipelineService?.resetStatsCounters() },
+                    onResetAllTimeCoverage = { pipelineService?.resetAllTimeCoverage() },
                     onUpdateGps = { onResult -> pipelineService?.refreshGpsCoordinates(onResult) ?: onResult(false) },
                     onRetryEnrichment = { icao -> pipelineService?.retryEnrichment(icao) },
                     onLoadEventLog = { icao -> pipelineService?.eventLogFor(icao) ?: emptyList() },
@@ -163,8 +164,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Sub-screen route, reached from Settings rather than the navigation bar. */
+/** Sub-screen routes, reached from Settings rather than the navigation bar. */
 private const val ROUTE_OFFLINE_MAPS = "offline_maps"
+private const val ROUTE_LOGS = "logs"
 
 /** Opens the system share sheet for a CSV written under external app storage. */
 private fun shareCsv(context: android.content.Context, file: java.io.File, chooserTitle: String = "Share history") {
@@ -191,6 +193,7 @@ private fun AdsbScaffold(
     onShareHistoryDebug: () -> Unit, // TEMP DEBUG: history investigation — delete with the rest
     onCheckGlobalDb: (onResult: (String) -> Unit) -> Unit,
     onResetCounters: () -> Unit,
+    onResetAllTimeCoverage: () -> Unit,
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit,
     onRetryEnrichment: (String) -> Unit,
     onLoadEventLog: suspend (String) -> List<com.laviavi.adsbandroid.data.AircraftEventLogEntity>,
@@ -330,10 +333,8 @@ private fun AdsbScaffold(
                         onStart = onStart,
                         onReconnect = onReconnect,
                         onStop = onStop,
+                        onResetAllTimeCoverage = onResetAllTimeCoverage,
                     )
-                }
-                composable(AdsbDestination.LOGS.route) {
-                    LogsScreen(viewModel = viewModel)
                 }
                 composable(AdsbDestination.SETTINGS.route) {
                     SettingsScreen(
@@ -341,6 +342,7 @@ private fun AdsbScaffold(
                         driverInstalled = driverInstalled,
                         onConfigChange = onConfigChange,
                         onOpenOfflineMaps = { navController.navigate(ROUTE_OFFLINE_MAPS) },
+                        onOpenLogs = { navController.navigate(ROUTE_LOGS) },
                         onUpdateGps = onUpdateGps,
                         onRequestLocationPermission = {
                             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -365,6 +367,11 @@ private fun AdsbScaffold(
                         observerLon = config.observerLongitude,
                         onBack = { navController.popBackStack() },
                     )
+                }
+                // Also a sub-screen of Settings now, not a bottom-nav destination —
+                // diagnostic, not something checked during normal operation.
+                composable(ROUTE_LOGS) {
+                    LogsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
                 }
             }
         }

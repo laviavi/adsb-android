@@ -4,6 +4,7 @@ import com.laviavi.adsbandroid.aircraft.AircraftSort
 import com.laviavi.adsbandroid.aircraft.AircraftSortOrder
 import com.laviavi.adsbandroid.location.ObserverMode
 import com.laviavi.adsbandroid.map.BaseMap
+import com.laviavi.adsbandroid.ui.map.MapLabelField
 import com.laviavi.adsbandroid.ui.map.MapLabelSize
 import com.laviavi.adsbandroid.ui.map.RingColorPreset
 import com.laviavi.adsbandroid.ui.map.RingLineStyle
@@ -99,7 +100,8 @@ data class AppConfig(
     /** Null leaves the basemap's own per-layer label colors untouched. */
     val mapLabelColor: RingColorPreset? = null,
     val mapShowRangeRings: Boolean      = true,
-    val mapShowLabels: Boolean          = true,
+    /** Which fields build an aircraft's map label; empty means no label at all. */
+    val mapLabelFields: Set<MapLabelField> = setOf(MapLabelField.CALLSIGN, MapLabelField.ALTITUDE),
     val mapShowGroundTraffic: Boolean   = true,
     /** Trail length in points. One of [TRAIL_LENGTHS]; 0 = trails off. */
     val mapTrailLength: Int             = 0,

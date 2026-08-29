@@ -26,6 +26,16 @@ enum class DataSource {
 }
 
 /**
+ * What kind of thing [AircraftState.operator] actually names — a registry
+ * owner and an operating airline are two different concepts that happen to
+ * often be the same string, and often aren't (a leased/financed airliner is
+ * routinely registered to a trust bank, not the airline flying it). Every
+ * write to `operator` must say which one it is; nothing may write `OWNER`
+ * over an already-known `AIRLINE` (see `AircraftManager.setAircraftMeta`).
+ */
+enum class OperatorKind { AIRLINE, OWNER }
+
+/**
  * The offline half of enrichment: everything derivable from an ICAO address and
  * a callsign with no network, no database and no I/O.
  *
@@ -40,6 +50,7 @@ object OfflineEnrichment {
         val registrationSource: DataSource? = null,
         val operator: String? = null,
         val operatorSource: DataSource? = null,
+        val operatorKind: OperatorKind? = null,
     )
 
     /**
@@ -69,6 +80,7 @@ object OfflineEnrichment {
             registrationSource = registrationSource,
             operator = operator,
             operatorSource = operator?.let { DataSource.ALGORITHMIC },
+            operatorKind = operator?.let { OperatorKind.AIRLINE },
         )
     }
 }

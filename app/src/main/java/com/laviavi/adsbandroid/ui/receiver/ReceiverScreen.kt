@@ -31,6 +31,7 @@ import com.laviavi.adsbandroid.pipeline.PipelineStats
 import com.laviavi.adsbandroid.pipeline.SourceState
 import com.laviavi.adsbandroid.ui.MainViewModel
 import com.laviavi.adsbandroid.ui.components.ReconnectConfirmDialog
+import com.laviavi.adsbandroid.ui.components.ResetCoverageConfirmDialog
 import com.laviavi.adsbandroid.ui.components.StopConfirmDialog
 import com.laviavi.adsbandroid.ui.model.CoverageMode
 import com.laviavi.adsbandroid.ui.model.CoverageWindow
@@ -60,6 +61,7 @@ fun ReceiverScreen(
     onStart: () -> Unit,
     onReconnect: () -> Unit,
     onStop: () -> Unit,
+    onResetAllTimeCoverage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
@@ -70,6 +72,7 @@ fun ReceiverScreen(
     val coverage by viewModel.coverage.collectAsStateWithLifecycle()
     val allTimeCoverage by viewModel.allTimeCoverage.collectAsStateWithLifecycle()
     val bestRangeEver by viewModel.bestRangeEver.collectAsStateWithLifecycle()
+    val sessionMaxRangeNm by viewModel.sessionMaxRangeNm.collectAsStateWithLifecycle()
     val coverageMode by viewModel.coverageMode.collectAsStateWithLifecycle()
     val coverageWindow by viewModel.coverageWindow.collectAsStateWithLifecycle()
     val aircraftCount by viewModel.aircraftRows.collectAsStateWithLifecycle()
@@ -106,6 +109,8 @@ fun ReceiverScreen(
                 unit = config.distanceUnit,
                 onModeChange = viewModel::setCoverageMode,
                 bestRange = bestRangeEver,
+                sessionMaxRangeNm = sessionMaxRangeNm,
+                onResetAllTimeCoverage = onResetAllTimeCoverage,
             )
         }
     }
@@ -516,11 +521,28 @@ private fun CoverageCard(
     unit: DistanceUnit,
     onModeChange: (CoverageMode) -> Unit,
     bestRange: BestRangeRecordEntity?,
+    sessionMaxRangeNm: Double?,
+    onResetAllTimeCoverage: () -> Unit,
 ) {
     val row = if (window == CoverageWindow.LIVE) liveRow else allTimeRow
+    var showResetConfirm by remember { mutableStateOf(false) }
 
     Card("COVERAGE") {
-        WindowToggle(window, onWindowChange)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            WindowToggle(window, onWindowChange)
+            if (window == CoverageWindow.ALL_TIME) {
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { showResetConfirm = true }) {
+                    Text("Reset", fontSize = 11.sp, color = AdsbColors.Error)
+                }
+            }
+        }
+        if (showResetConfirm) {
+            ResetCoverageConfirmDialog(
+                onConfirm = onResetAllTimeCoverage,
+                onDismiss = { showResetConfirm = false },
+            )
+        }
 
         if (row == null) {
             Text(
@@ -582,17 +604,27 @@ private fun CoverageCard(
                     color = AdsbColors.TextDisabled,
                 )
 
-                row.bestSector?.let { best ->
-                    val v = row.sectors[best]?.maxMi ?: 0.0
+                // row.bestSector/worstSector are always range-based (widest/narrowest
+                // median), which is right for RANGE mode but wrong for AIRCRAFTS — in
+                // that mode "best"/"worst" must be picked and displayed by count instead,
+                // or the two lines contradict the polar/toggle right above them.
+                val activeByCount = row.sectors.entries.filter { it.value.count > 0 }
+                val bestSector = if (mode == CoverageMode.RANGE) row.bestSector else activeByCount.maxByOrNull { it.value.count }?.key
+                val worstSector = if (mode == CoverageMode.RANGE) row.worstSector else activeByCount.minByOrNull { it.value.count }?.key
+
+                bestSector?.let { best ->
+                    val s = row.sectors[best]
+                    val value = if (mode == CoverageMode.RANGE) unit.formatWhole((s?.maxMi ?: 0.0) / NM_TO_MI) else "${s?.count ?: 0} ac"
                     Text(
-                        "Best ${best.name} ${unit.formatWhole(v / NM_TO_MI)}",
+                        "Best ${best.name} $value",
                         fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AdsbColors.Success,
                     )
                 }
-                row.worstSector?.let { worst ->
-                    val v = row.sectors[worst]?.maxMi ?: 0.0
+                worstSector?.let { worst ->
+                    val s = row.sectors[worst]
+                    val value = if (mode == CoverageMode.RANGE) unit.formatWhole((s?.maxMi ?: 0.0) / NM_TO_MI) else "${s?.count ?: 0} ac"
                     Text(
-                        "Worst ${worst.name} ${unit.formatWhole(v / NM_TO_MI)}",
+                        "Worst ${worst.name} $value",
                         fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AdsbColors.Warning,
                     )
                 }
@@ -602,6 +634,16 @@ private fun CoverageCard(
                         "Best ever ${unit.formatWhole(it.distanceNm)} · ${it.callsign ?: it.icao} · " +
                             bestRangeDateFormat.format(Date(it.timestampMs)),
                         fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.Primary,
+                    )
+                }
+                // Farthest contact since this receiver session began — unlike an
+                // instantaneous max over the live table, doesn't drop back down once
+                // the far aircraft leaves range. Resets only on a new session
+                // (Start/Reconnect/replug), never on "Reset counters".
+                sessionMaxRangeNm?.let {
+                    Text(
+                        "Session max ${unit.formatWhole(it)}",
+                        fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = AdsbColors.TextSecondary,
                     )
                 }
 

@@ -76,7 +76,7 @@ class AppDatabaseMigrationTests {
         // AppDatabase's actual entities — a wrong migration throws here rather
         // than silently succeeding.
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
             .build()
 
         runBlocking {
@@ -115,7 +115,7 @@ class AppDatabaseMigrationTests {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
             .build()
 
         val seen = runBlocking { migrated.aircraftSeenDao().observeAll().first() }
@@ -144,7 +144,7 @@ class AppDatabaseMigrationTests {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
             .build()
 
         runBlocking {
@@ -180,7 +180,7 @@ class AppDatabaseMigrationTests {
         legacy.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
             .build()
 
         runBlocking {
@@ -201,6 +201,87 @@ class AppDatabaseMigrationTests {
                 ),
             )
             assertEquals(150.0, migrated.bestRangeDao().get()?.distanceNm ?: 0.0, 1e-9)
+        }
+        migrated.close()
+    }
+
+    @Test fun `v10 to v11 adds aircraft_seen operatorIsOwner, defaulting existing rows to false`() {
+        // Only pre-migrated far enough to legally insert into aircraft_seen (present
+        // since v1) — the actual, Room-tracked migration run (all of it, replayed
+        // from v1) happens in the real builder below, same as every other test in
+        // this file. Manually raw-migrating all the way to 9_10 here and then
+        // letting Room replay it *again* double-runs its non-idempotent ADD COLUMN
+        // and fails with "duplicate column name" — raw .migrate() calls never touch
+        // user_version, so Room's own build() always replays the full chain.
+        val legacy = Room.databaseBuilder(context, LegacyV1Database::class.java, dbName).build()
+        val raw = legacy.openHelper.writableDatabase
+        MIGRATION_1_2.migrate(raw)
+        MIGRATION_2_3.migrate(raw)
+        MIGRATION_3_4.migrate(raw)
+        MIGRATION_4_5.migrate(raw)
+        raw.execSQL(
+            "INSERT INTO aircraft_seen (icao, operator, messageCount, firstSeenMs, lastSeenMs) " +
+                "VALUES ('AAAAAA', 'UMB BANK NA TRUSTEE', 1, 0, 0)",
+        )
+        legacy.close()
+
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+            .build()
+
+        runBlocking {
+            // Pre-existing row survives with the new column defaulted to false — a
+            // row written before this migration existed can't retroactively know
+            // whether its operator was an owner or an airline.
+            val existing = migrated.aircraftSeenDao().getAllOnce().single { it.icao == "AAAAAA" }
+            assertEquals("UMB BANK NA TRUSTEE", existing.operator)
+            assertEquals(false, existing.operatorIsOwner)
+
+            migrated.aircraftSeenDao().upsert(
+                AircraftSeenEntity(
+                    icao = "BBBBBB", callsign = null, registration = "N116AN", operator = "UMB BANK NA TRUSTEE",
+                    operatorIsOwner = true, aircraftType = "A321", route = null, altitudeFt = null,
+                    groundSpeedKt = null, trackDeg = null, latitudeDeg = null, longitudeDeg = null,
+                    distanceNm = null, squawk = null, messageCount = 1, firstSeenMs = 0, lastSeenMs = 0,
+                ),
+            )
+            assertEquals(true, migrated.aircraftSeenDao().getAllOnce().single { it.icao == "BBBBBB" }.operatorIsOwner)
+        }
+        migrated.close()
+    }
+
+    @Test fun `v11 to v12 adds a working altitude_samples table without touching coverage_samples`() {
+        // Pre-existing tables only go back to v7 (coverage_samples) — no data needs
+        // pre-migrating here since altitude_samples is new in v12 and starts empty.
+        val legacy = Room.databaseBuilder(context, LegacyV1Database::class.java, dbName).build()
+        val raw = legacy.openHelper.writableDatabase
+        MIGRATION_1_2.migrate(raw)
+        MIGRATION_2_3.migrate(raw)
+        MIGRATION_3_4.migrate(raw)
+        MIGRATION_4_5.migrate(raw)
+        MIGRATION_5_6.migrate(raw)
+        MIGRATION_6_7.migrate(raw)
+        raw.execSQL(
+            "INSERT INTO coverage_samples (timestampMs, sector, count, maxMi, medianSignalDbfs) " +
+                "VALUES (1000, 'N', 3, 42.0, -12.0)",
+        )
+        legacy.close()
+
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+            .build()
+
+        runBlocking {
+            // Pre-existing coverage_samples row survives — v12 only adds a new table.
+            assertEquals(1, migrated.coverageSampleDao().allTimeBySector().size)
+
+            migrated.altitudeSampleDao().insertAll(listOf(
+                AltitudeSampleEntity(timestampMs = 2_000L, band = "BAND_3000_10000", count = 4),
+                AltitudeSampleEntity(timestampMs = 3_000L, band = "BAND_3000_10000", count = 2),
+            ))
+            val totals = migrated.altitudeSampleDao().allTimeByBand()
+            assertEquals(1, totals.size)
+            assertEquals(6, totals.single().count)
         }
         migrated.close()
     }

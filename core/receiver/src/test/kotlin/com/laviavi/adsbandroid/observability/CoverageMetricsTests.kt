@@ -217,5 +217,82 @@ class CoverageMetricsTests {
             assertEquals(8, row.sectors.size)
             assertEquals(0, row.sectors.getValue(CompassSector.E).count)
         }
+
+        @Test fun `altitude counts default to all-zero when none are supplied`() {
+            val row = CoverageMetrics.synthesizeAllTimeRow(emptyList(), 1.0, 2.0)
+            assertEquals(4, row.altitudeCounts.size)
+            assertTrue(row.altitudeCounts.values.all { it == 0 })
+        }
+
+        @Test fun `supplied altitude counts pass through, missing bands report zero`() {
+            val row = CoverageMetrics.synthesizeAllTimeRow(
+                emptyList(), 1.0, 2.0,
+                altitudeCounts = mapOf(AltitudeBand.ABOVE_30000 to 7),
+            )
+            assertEquals(7, row.altitudeCounts.getValue(AltitudeBand.ABOVE_30000))
+            assertEquals(0, row.altitudeCounts.getValue(AltitudeBand.BELOW_3000))
+        }
+    }
+
+    @Nested inner class AccumulateSectorTotals {
+
+        private fun tick(distanceNm: Double, bearingDeg: Double) =
+            CoverageMetrics.computeRow(1.0, 2.0, listOf(PositionedAircraft(distanceNm, bearingDeg, altitudeFt = null)))!!
+
+        @Test fun `starting from empty, one tick's counts and max carry straight through`() {
+            val running = CoverageMetrics.accumulateSectorTotals(emptyList(), tick(distanceNm = 50.0, bearingDeg = 0.0))
+            val n = running.single { it.sector == CompassSector.N }
+            assertEquals(1, n.count)
+            assertTrue(n.maxMi > 0.0)
+            assertTrue(running.filter { it.sector != CompassSector.N }.all { it.count == 0 && it.maxMi == 0.0 })
+        }
+
+        @Test fun `counts sum across ticks in the same sector`() {
+            var running = CoverageMetrics.accumulateSectorTotals(emptyList(), tick(distanceNm = 10.0, bearingDeg = 0.0))
+            running = CoverageMetrics.accumulateSectorTotals(running, tick(distanceNm = 20.0, bearingDeg = 0.0))
+            running = CoverageMetrics.accumulateSectorTotals(running, tick(distanceNm = 5.0, bearingDeg = 0.0))
+            assertEquals(3, running.single { it.sector == CompassSector.N }.count)
+        }
+
+        @Test fun `max range never decreases even when a later tick is smaller`() {
+            var running = CoverageMetrics.accumulateSectorTotals(emptyList(), tick(distanceNm = 100.0, bearingDeg = 0.0))
+            val peakMi = running.single { it.sector == CompassSector.N }.maxMi
+            running = CoverageMetrics.accumulateSectorTotals(running, tick(distanceNm = 10.0, bearingDeg = 0.0))
+            assertEquals(peakMi, running.single { it.sector == CompassSector.N }.maxMi, 1e-9)
+        }
+
+        @Test fun `different sectors accumulate independently`() {
+            var running = CoverageMetrics.accumulateSectorTotals(emptyList(), tick(distanceNm = 30.0, bearingDeg = 0.0))
+            running = CoverageMetrics.accumulateSectorTotals(running, tick(distanceNm = 40.0, bearingDeg = 180.0))
+            assertEquals(1, running.single { it.sector == CompassSector.N }.count)
+            assertEquals(1, running.single { it.sector == CompassSector.S }.count)
+            assertEquals(0, running.single { it.sector == CompassSector.E }.count)
+        }
+    }
+
+    @Nested inner class AccumulateAltitudeCounts {
+
+        private fun tick(altitudeFt: Int) =
+            CoverageMetrics.computeRow(1.0, 2.0, listOf(PositionedAircraft(distanceNm = 10.0, bearingDeg = 0.0, altitudeFt = altitudeFt)))!!
+
+        @Test fun `starting from empty, one tick's counts carry straight through`() {
+            val running = CoverageMetrics.accumulateAltitudeCounts(emptyMap(), tick(altitudeFt = 1000))
+            assertEquals(1, running.getValue(AltitudeBand.BELOW_3000))
+            assertEquals(0, running.getValue(AltitudeBand.ABOVE_30000))
+        }
+
+        @Test fun `counts sum across ticks in the same band`() {
+            var running = CoverageMetrics.accumulateAltitudeCounts(emptyMap(), tick(altitudeFt = 1000))
+            running = CoverageMetrics.accumulateAltitudeCounts(running, tick(altitudeFt = 500))
+            assertEquals(2, running.getValue(AltitudeBand.BELOW_3000))
+        }
+
+        @Test fun `different bands accumulate independently`() {
+            var running = CoverageMetrics.accumulateAltitudeCounts(emptyMap(), tick(altitudeFt = 1000))
+            running = CoverageMetrics.accumulateAltitudeCounts(running, tick(altitudeFt = 40000))
+            assertEquals(1, running.getValue(AltitudeBand.BELOW_3000))
+            assertEquals(1, running.getValue(AltitudeBand.ABOVE_30000))
+            assertEquals(0, running.getValue(AltitudeBand.BAND_3000_10000))
+        }
     }
 }

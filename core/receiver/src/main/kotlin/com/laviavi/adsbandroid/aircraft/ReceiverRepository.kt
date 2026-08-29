@@ -172,7 +172,20 @@ class ReceiverRepository(
         _aircraft.value = withContext(dispatcher) { AircraftSort.apply(aircraftMgr.aircraft, sortOrderProvider()) }
     }
 
-    suspend fun reset() = withContext(dispatcher) { aircraftMgr.reset() }
+    /**
+     * Aircraft still tracked at reset time are reported via [onDeparted] before the
+     * table is cleared — same treatment an expiry sweep would eventually give them.
+     * [reset] only ever fires at a genuine session boundary (Start, Reconnect, a
+     * dongle replug — see `PipelineService.clearSessionState`'s doc comment), where
+     * whatever was being tracked is about to become unreachable anyway; previously
+     * this cleared the table with no callback at all, so anything still live at
+     * that exact moment was silently dropped and never written to History.
+     */
+    suspend fun reset() = withContext(dispatcher) {
+        val stillTracked = aircraftMgr.aircraft
+        aircraftMgr.reset()
+        if (stillTracked.isNotEmpty()) onDeparted(stillTracked)
+    }
 
     /**
      * Not confined to [dispatcher]: these are two independent primitive vars on

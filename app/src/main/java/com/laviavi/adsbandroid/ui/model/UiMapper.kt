@@ -1,25 +1,36 @@
 package com.laviavi.adsbandroid.ui.model
 
 import com.laviavi.adsbandroid.aircraft.AircraftState
+import com.laviavi.adsbandroid.aircraft.routeDestination
 import com.laviavi.adsbandroid.pipeline.PipelineStats
 import com.laviavi.adsbandroid.pipeline.SourceState
+import com.laviavi.adsbandroid.ui.map.MapLabelField
 import com.laviavi.adsbandroid.units.DistanceUnit
 
 object UiMapper {
 
     private const val FRESH_THRESHOLD_MS = 5_000L
-    private const val AGEING_THRESHOLD_MS = 15_000L
     private val EMERGENCY_SQUAWKS = setOf("7500", "7600", "7700")
 
+    /**
+     * @param dropAfterSeconds the live config's "Drop aircraft after" threshold
+     * (`AppConfig.aircraftExpirySeconds`). STALE starts one second past it, so a
+     * row reaches STALE (and its grey-out) only in the up-to-30s window between
+     * crossing that threshold and the periodic expiry sweep actually removing it
+     * — rather than the old fixed 15s, which greyed rows out for most of their
+     * live-list lifetime regardless of the drop setting.
+     */
     fun mapRow(
         state: AircraftState,
         nowMs: Long,
         unit: DistanceUnit = DistanceUnit.MILES,
+        dropAfterSeconds: Int,
     ): AircraftRowUi {
         val ageMs = nowMs - state.lastSeenMs
+        val ageingThresholdMs = (dropAfterSeconds + 1) * 1_000L
         val ageTier = when {
             ageMs <= FRESH_THRESHOLD_MS -> AgeTier.FRESH
-            ageMs <= AGEING_THRESHOLD_MS -> AgeTier.AGEING
+            ageMs <= ageingThresholdMs -> AgeTier.AGEING
             else -> AgeTier.STALE
         }
         return AircraftRowUi(
@@ -29,6 +40,7 @@ object UiMapper {
             registration = state.registration,
             registrationMark = state.registrationSource,
             operator = state.operator,
+            operatorKind = state.operatorKind,
             route = state.route,
             routeMark = state.routeSource,
             altitude = formatAltitude(state.altitudeFt, state.onGround),
@@ -45,6 +57,7 @@ object UiMapper {
             distance = state.distanceNm?.let { unit.formatValue(it) } ?: "---",
             distanceUnit = unit.label,
             bearing = state.bearingDeg?.let { "${it.toInt().toString().padStart(3, '0')}°" } ?: "---",
+            bearingDeg = state.bearingDeg,
             signalBars = signalToBars(state.signalDbfs),
             messageCount = "${state.messageCount} msgs",
             age = formatAge(ageMs),
@@ -62,6 +75,8 @@ object UiMapper {
         nowMs: Long,
         unit: DistanceUnit = DistanceUnit.MILES,
         trailLength: Int = 0,
+        dropAfterSeconds: Int,
+        labelFields: Set<MapLabelField> = setOf(MapLabelField.CALLSIGN, MapLabelField.ALTITUDE),
     ): MapMarker? {
         val lat = state.latitude ?: return null
         val lon = state.longitude ?: return null
@@ -69,18 +84,34 @@ object UiMapper {
         val trail = if (trailLength <= 0) emptyList()
         else state.positionHistory.takeLast(trailLength)
 
-        val altLabel = when {
-            state.onGround -> "GND"
-            state.altitudeFt != null -> "${state.altitudeFt!! / 100}"
-            else -> null
-        }
-        val label = state.callsign?.let { cs ->
-            when {
-                ra -> "$cs RA"
-                altLabel != null -> "$cs $altLabel"
-                else -> cs
+        val labelParts = buildList {
+            // No callsign yet (it only exists once a DF17 ident message decodes, which
+            // can lag well behind position) — fall back to registration, which is
+            // already resolved offline-first from the global aircraft mirror
+            // (AircraftMetaEnrichment.lookup(), not US-only), then the bare ICAO hex
+            // as a last resort that's always available for any aircraft, anywhere.
+            if (MapLabelField.CALLSIGN in labelFields) {
+                add(
+                    state.callsign?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: state.registration?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: state.icao
+                )
             }
+            if (MapLabelField.ALTITUDE in labelFields) {
+                when {
+                    state.onGround -> add("GND")
+                    // Full altitude, not the flight-level-style /100 shorthand (e.g. "140" for
+                    // 14,000 ft) — indistinguishable from a 3-digit reading at a glance.
+                    state.altitudeFt != null -> add("%,d".format(state.altitudeFt))
+                }
+            }
+            if (MapLabelField.DESTINATION in labelFields) {
+                routeDestination(state.route)?.let { add(it) }
+            }
+            // RA is a safety-critical advisory — always shown regardless of field selection.
+            if (ra) add("RA")
         }
+        val label = labelParts.joinToString(" ").ifBlank { null }
 
         val vs = when {
             state.verticalRateFpm == null -> ""
@@ -102,8 +133,10 @@ object UiMapper {
             trackDeg = state.trackDeg,
             altitudeFt = state.altitudeFt,
             callsign = state.callsign,
+            registration = state.registration,
+            route = state.route,
             onGround = state.onGround,
-            isStale = (nowMs - state.lastSeenMs) > AGEING_THRESHOLD_MS,
+            isStale = (nowMs - state.lastSeenMs) > (dropAfterSeconds + 1) * 1_000L,
             emergency = state.squawk in EMERGENCY_SQUAWKS,
             raActive = ra,
             label = label,
@@ -114,30 +147,6 @@ object UiMapper {
                 else "${unit.format(d)} · ${b.toInt().toString().padStart(3, '0')}°"
             },
             detailLine = detail,
-        )
-    }
-
-    /**
-     * [sessionMaxRangeNm] is the running max for the current receiver session
-     * (survives an aircraft leaving range; resets only on app start or a
-     * dongle reconnect — see `PipelineService.clearSessionState()`), not an
-     * instantaneous max over [aircraft].
-     */
-    fun mapMetrics(
-        aircraft: List<AircraftState>,
-        stats: PipelineStats.Snapshot,
-        sparkline: List<Float>,
-        config: com.laviavi.adsbandroid.pipeline.AppConfig,
-        sessionMaxRangeNm: Double? = null,
-    ): LiveMetrics {
-        return LiveMetrics(
-            trackedCount = aircraft.size,
-            framesPerSecond = stats.messagesPerSecond.toInt().toString(),
-            validPercent = if (stats.windowTested > 0)
-                "%.1f".format(stats.windowAcceptRatePercent) else "0",
-            maxRangeMi = sessionMaxRangeNm?.let { config.distanceUnit.formatValue(it) } ?: "0",
-            gainDb = "---", // filled from GainOptions by caller
-            sparklineData = sparkline,
         )
     }
 
@@ -155,10 +164,9 @@ object UiMapper {
         return ReceiverStatusUi(
             state = state,
             stateLabel = label,
-            gainDb = "---",
             uptime = formatUptime(stats.uptimeMs),
-            msgRate = "${stats.messagesPerSecond.toInt()}/s",
-            crcPercent = if (stats.windowTested > 0)
+            msgRate = "${stats.messagesPerSecond.toInt()}",
+            validPercent = if (stats.windowTested > 0)
                 "%.1f%%".format(stats.windowAcceptRatePercent) else "0%",
             sourceName = sourceName,
             errorMessage = errorMsg,

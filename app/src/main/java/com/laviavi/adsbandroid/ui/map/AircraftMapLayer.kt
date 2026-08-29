@@ -33,6 +33,7 @@ import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
 import org.maplibre.android.style.layers.PropertyFactory.textColor
 import org.maplibre.android.style.layers.PropertyFactory.textField
+import org.maplibre.android.style.layers.PropertyFactory.textFont
 import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
 import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
 import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
@@ -107,6 +108,7 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         style.addLayer(
             SymbolLayer(LYR_RING_LABEL, SRC_RING_LABELS).withProperties(
                 textField(get(PROP_LABEL)),
+                textFont(TEXT_FONT),
                 textSize(11f),
                 textColor(get(PROP_COLOR)),
                 textHaloColor("#000000"),
@@ -172,33 +174,27 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
                 iconIgnorePlacement(true),
             )
         )
+        // A single layer, always-shown (textAllowOverlap/textIgnorePlacement true) rather
+        // than the collision-managed default plus a bypass layer for selected/RA/emergency:
+        // collision-managed placement is recomputed from scratch on every setGeoJson()
+        // refresh (every ~500ms), and with aircraft this close together, which label wins
+        // the overlap fight can flip between ticks — that flip IS the "blinking" reported.
+        // Always-shown trades occasional label overlap in a dense cluster for stability,
+        // which reads far better on a live-updating map than a label flickering in and out.
         style.addLayer(
             SymbolLayer(LYR_LABELS, SRC_AIRCRAFT).withProperties(
                 textField(get(PROP_LABEL)),
+                textFont(TEXT_FONT),
                 textSize(10f),
                 textColor(get(PROP_COLOR)),
                 textHaloColor("#000000"),
                 textHaloWidth(1.2f),
-                textOffset(arrayOf(0.9f, 0.9f)),
-                textAllowOverlap(false),
-                textIgnorePlacement(false),
-            ).withFilter(
-                Expression.all(eq(get(PROP_HAS_LABEL), literal(true)), eq(get(PROP_ALWAYS_LABEL), literal(false)))
-            ).also { it.setMinZoom(LABEL_MIN_ZOOM) }
-        )
-        style.addLayer(
-            SymbolLayer(LYR_LABELS_ALWAYS, SRC_AIRCRAFT).withProperties(
-                textField(get(PROP_LABEL)),
-                textSize(10f),
-                textColor(get(PROP_COLOR)),
-                textHaloColor("#000000"),
-                textHaloWidth(1.2f),
-                textOffset(arrayOf(0.9f, 0.9f)),
+                // 0.9em used to sit inside the icon's own ~12dp radius at this text size —
+                // the label and the plane symbol visually overlapped. 1.8em clears it.
+                textOffset(arrayOf(1.8f, 1.8f)),
                 textAllowOverlap(true),
                 textIgnorePlacement(true),
-            ).withFilter(
-                Expression.all(eq(get(PROP_HAS_LABEL), literal(true)), eq(get(PROP_ALWAYS_LABEL), literal(true)))
-            )
+            ).withFilter(eq(get(PROP_HAS_LABEL), literal(true)))
         )
 
         // Clustered mode: hidden until update() turns it on.
@@ -219,6 +215,7 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         style.addLayer(
             SymbolLayer(LYR_CLUSTER_COUNT, SRC_CLUSTER).withProperties(
                 textField(Expression.toString(get("point_count"))),
+                textFont(TEXT_FONT),
                 textSize(12f),
                 textColor(AdsbColors.OnPrimary.toHex()),
                 textAllowOverlap(true),
@@ -234,7 +231,6 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         observer: LatLng?,
         selectedIcao: String?,
         showRangeRings: Boolean,
-        showLabels: Boolean,
         showGroundTraffic: Boolean,
         ringRadiiNm: List<Double>,
         ringLabels: List<String>,
@@ -294,7 +290,7 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
             (0 until MAX_DRAWN_MARKERS).map { visible[(it * stride).toInt()] }
         } else visible
 
-        val features = drawn.map { m -> markerFeature(m, m.icao == selectedIcao, showLabels) }
+        val features = drawn.map { m -> markerFeature(m, m.icao == selectedIcao) }
         aircraftSource.setGeoJson(FeatureCollection.fromFeatures(features))
 
         val trailFeatures = drawn.filter { it.trail.size > 1 }.map { m ->
@@ -312,13 +308,12 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         val iv = if (visible) Property.NONE else Property.VISIBLE
         style.getLayer(LYR_AIRCRAFT_ICONS)?.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(iv))
         style.getLayer(LYR_LABELS)?.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(iv))
-        style.getLayer(LYR_LABELS_ALWAYS)?.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(iv))
         style.getLayer(LYR_SELECTED_RING)?.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(iv))
         style.getLayer(LYR_ALERT_RING)?.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(iv))
         style.getLayer(LYR_TRAILS)?.setProperties(org.maplibre.android.style.layers.PropertyFactory.visibility(iv))
     }
 
-    private fun markerFeature(m: MapMarker, selected: Boolean, showLabels: Boolean): Feature {
+    private fun markerFeature(m: MapMarker, selected: Boolean): Feature {
         val colorHex = when {
             m.raActive || m.emergency -> AdsbColors.Error
             m.isStale -> AdsbColors.TextDisabled
@@ -331,7 +326,11 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
             com.laviavi.adsbandroid.ui.model.MarkerShape.CIRCLE -> MarkerIcons.CIRCLE
             com.laviavi.adsbandroid.ui.model.MarkerShape.TRIANGLE -> MarkerIcons.TRIANGLE
         }
-        return Feature.fromGeometry(Point.fromLngLat(m.lon, m.lat)).apply {
+        // A stable per-feature id (the ICAO hex) lets MapLibre diff features across
+        // setGeoJson() refreshes by identity instead of treating every tick's full
+        // replacement as an all-new feature set — without it, the symbol placement
+        // engine re-animates every icon/label on every refresh, which read as blinking.
+        return Feature.fromGeometry(Point.fromLngLat(m.lon, m.lat), null, m.icao).apply {
             addStringProperty(PROP_ICAO, m.icao)
             addStringProperty(PROP_SHAPE, shape)
             addNumberProperty(PROP_ROTATION, (m.trackDeg ?: 0).toFloat())
@@ -340,17 +339,14 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
             addNumberProperty(PROP_OPACITY, if (m.isStale) 0.5f else 1f)
             addBooleanProperty(PROP_SELECTED, selected)
             addBooleanProperty(PROP_ALERT, m.raActive || m.emergency)
-            val label = m.label.takeIf { showLabels }
-            addBooleanProperty(PROP_HAS_LABEL, label != null)
-            addStringProperty(PROP_LABEL, label ?: "")
-            addBooleanProperty(PROP_ALWAYS_LABEL, selected || m.raActive || m.emergency)
+            addBooleanProperty(PROP_HAS_LABEL, m.label != null)
+            addStringProperty(PROP_LABEL, m.label ?: "")
         }
     }
 
     companion object {
         const val LYR_AIRCRAFT_ICONS = "aircraft-icons"
         const val LYR_LABELS = "aircraft-labels"
-        const val LYR_LABELS_ALWAYS = "aircraft-labels-always"
         const val LYR_SELECTED_RING = "aircraft-selected-ring"
         const val LYR_ALERT_RING = "aircraft-alert-ring"
         private const val LYR_CLUSTER_CIRCLES = "aircraft-cluster-circles"
@@ -379,7 +375,6 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         private const val PROP_ALERT = "alert"
         private const val PROP_HAS_LABEL = "hasLabel"
         private const val PROP_LABEL = "label"
-        private const val PROP_ALWAYS_LABEL = "alwaysLabel"
         private const val PROP_WIDTH = "width"
         private const val PROP_HALO_WIDTH = "haloWidth"
 
@@ -387,8 +382,18 @@ internal class AircraftMapLayer(style: org.maplibre.android.maps.Style, density:
         const val CLUSTER_ZOOM_BELOW = 8.0
         const val CLUSTER_MIN_COUNT = 20
         const val MAX_DRAWN_MARKERS = 400
-        private const val LABEL_MIN_ZOOM = 9.0f
         private const val CLUSTER_RADIUS_PX = 60
+
+        // MapLibre's own SDK default text-font — used by any SymbolLayer that doesn't
+        // set one explicitly — is "Open Sans Regular,Arial Unicode MS Regular", which
+        // OpenFreeMap's glyph server 404s on for every one of its styles (confirmed live
+        // against all 4: Liberty/Bright/Positron/Dark). Every style's own label layers use
+        // Noto Sans instead, which does resolve — explicit here so our layers don't
+        // silently inherit the broken default. Left unset, the failed glyph fetch can
+        // withhold the whole shared aircraft source's symbol placement pass from
+        // rendering — icons included, not just the text — since collision/placement is
+        // computed once per source-tile across every symbol layer reading it.
+        private val TEXT_FONT = arrayOf("Noto Sans Regular")
 
         /** Great-circle destination points around a center — renders a range ring as an actual geodesic circle (real nm at any zoom), not a MapLibre CircleLayer (screen-pixel radius, not geo-accurate). Returns (lat, lon) pairs. */
         fun circlePoints(centerLat: Double, centerLon: Double, radiusNm: Double, points: Int = 144): List<Pair<Double, Double>> {

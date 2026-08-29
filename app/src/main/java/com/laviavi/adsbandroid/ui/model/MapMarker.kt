@@ -15,11 +15,17 @@ data class MapMarker(
     val trackDeg: Int?,
     val altitudeFt: Int?,
     val callsign: String?,
+    val registration: String?,
+    val route: String?,
     val onGround: Boolean,
     val isStale: Boolean,
     val emergency: Boolean,
     val raActive: Boolean,
-    /** `UAL2184 350`, or `SWA1188 RA` during an advisory. Null when there is no callsign. */
+    /**
+     * Space-joined from whichever of [com.laviavi.adsbandroid.ui.map.MapLabelField]
+     * the user has selected (e.g. `UAL2184 350`, `UAL2184 LAX`), plus a trailing `RA`
+     * during an advisory regardless of selection. Null when nothing applies.
+     */
     val label: String?,
     /** Oldest first, already truncated to the configured trail length. */
     val trail: List<TrackPoint> = emptyList(),

@@ -127,6 +127,25 @@ fun MapScreen(
     }
 
     LaunchedEffect(mapView) {
+        // WHEN_DIRTY (the SDK default, untouched here) only repaints when explicitly
+        // marked dirty, and that mark is dropped rather than queued if the renderer's
+        // GL surface hasn't finished being created yet — which races every one of this
+        // composable's setup effects below, including the triggerRepaint() call the
+        // marker-update effect issues on every data change. Rather than switch render
+        // modes (tried once — made things worse, see git history), this listener stays
+        // registered for the MapView's whole lifetime and re-issues a repaint every
+        // time the SDK confirms a frame actually finished painting. The very first such
+        // confirmation proves the surface is finally alive, and by then the aircraft
+        // source already holds current data (set by the marker-update effect, whose
+        // own triggerRepaint() may have been the one that got dropped) — so this catch-up
+        // repaint is what actually gets it on screen. Once steady-state, each real
+        // repaint triggers one harmless no-op follow-up; negligible cost, self-limiting.
+        mapView.addOnDidFinishRenderingMapListener(object : MapView.OnDidFinishRenderingMapListener {
+            override fun onDidFinishRenderingMap(fully: Boolean) {
+                map?.triggerRepaint()
+            }
+        })
+
         mapView.getMapAsync { m ->
             map = m
             m.uiSettings.isCompassEnabled = false
@@ -200,7 +219,6 @@ fun MapScreen(
             observer = observer,
             selectedIcao = selectedIcao,
             showRangeRings = config.mapShowRangeRings,
-            showLabels = config.mapShowLabels,
             showGroundTraffic = config.mapShowGroundTraffic,
             ringRadiiNm = config.mapRingRadiiMi.sorted().map { DistanceUnit.MILES.toNm(it.toDouble()) },
             ringLabels = config.mapRingRadiiMi.sorted().map { config.distanceUnit.formatWhole(DistanceUnit.MILES.toNm(it.toDouble())) },
@@ -211,6 +229,10 @@ fun MapScreen(
         )
         shownOfTotal = result.shown to result.total
         m?.style?.let { layer.setClusterLayersVisible(result.clustered, it) }
+        // MapLibre's GL renderer doesn't always repaint on a source-only update — without
+        // a following camera move, markers stay invisible until the next pan/zoom forces
+        // a redraw. This is that redraw.
+        m?.triggerRepaint()
     }
 
     Box(modifier = modifier.fillMaxSize().background(AdsbColors.Background)) {
@@ -451,11 +473,17 @@ private fun LayersPanel(
             CheckRow("Range rings", config.mapShowRangeRings) {
                 onConfigChange(config.copy(mapShowRangeRings = it))
             }
-            CheckRow("Callsign labels", config.mapShowLabels) {
-                onConfigChange(config.copy(mapShowLabels = it))
-            }
-            CheckRow("Ground traffic", config.mapShowGroundTraffic) {
+            CheckRow("Show ground aircraft", config.mapShowGroundTraffic) {
                 onConfigChange(config.copy(mapShowGroundTraffic = it))
+            }
+
+            Spacer(Modifier.height(AdsbDimens.SpacingSm))
+            SectionLabel("LABEL CONTENT")
+            MapLabelField.entries.forEach { field ->
+                CheckRow(field.label, field in config.mapLabelFields) { checked ->
+                    val fields = if (checked) config.mapLabelFields + field else config.mapLabelFields - field
+                    onConfigChange(config.copy(mapLabelFields = fields))
+                }
             }
 
             Spacer(Modifier.height(AdsbDimens.SpacingSm))
@@ -699,19 +727,30 @@ private fun SelectionSheet(
                     .background(AdsbColors.Outline, RoundedCornerShape(2.dp)),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    marker.icao,
-                    fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.W600,
-                    color = AdsbColors.Primary,
-                )
-                marker.callsign?.let {
-                    Spacer(Modifier.width(8.dp))
-                    Text(it, fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
+                val primary = marker.registration ?: marker.callsign
+                primary?.let {
+                    Text(
+                        it,
+                        fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.W600,
+                        color = AdsbColors.Primary,
+                    )
+                }
+                if (marker.registration != null) {
+                    marker.callsign?.let {
+                        Spacer(Modifier.width(8.dp))
+                        Text(it, fontSize = 17.sp, fontWeight = FontWeight.W600, color = AdsbColors.TextPrimary)
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 marker.distanceBearing?.let {
                     Text(it, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = AdsbColors.TextSecondary)
                 }
+            }
+            marker.route?.let {
+                Text(
+                    it, fontSize = 13.sp, color = AdsbColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
             Text(
                 marker.detailLine,

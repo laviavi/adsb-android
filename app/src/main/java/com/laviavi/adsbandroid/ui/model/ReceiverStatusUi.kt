@@ -6,10 +6,9 @@ import androidx.compose.runtime.Immutable
 data class ReceiverStatusUi(
     val state: ReceiverState = ReceiverState.STOPPED,
     val stateLabel: String = "STOPPED",
-    val gainDb: String = "---",
     val uptime: String = "00:00:00",
-    val msgRate: String = "0/s",
-    val crcPercent: String = "0%",
+    val msgRate: String = "0",
+    val validPercent: String = "0%",
     val sourceName: String? = null,
     val errorMessage: String? = null,
 )

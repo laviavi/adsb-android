@@ -2,6 +2,7 @@ package com.laviavi.adsbandroid.aircraft
 
 import com.laviavi.adsbandroid.crc.CrcChecker
 import com.laviavi.adsbandroid.enrich.DataSource
+import com.laviavi.adsbandroid.enrich.OperatorKind
 
 /**
  * Live state of a single tracked aircraft.
@@ -120,6 +121,8 @@ data class AircraftState(
     val routeSource: DataSource?   = null,
     val registrationSource: DataSource? = null,
     val operatorSource: DataSource?     = null,
+    /** Whether [operator] names an airline or just the registered owner — see [OperatorKind]. */
+    val operatorKind: OperatorKind?     = null,
 ) {
     /** Average of the linear signal history, matching Python's `avg_signal` property. */
     val avgSignal: Double? get() = signalHistory.takeIf { it.isNotEmpty() }?.average()

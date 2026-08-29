@@ -302,7 +302,7 @@ Each is enumerated in a test and fails loudly if it widens.
 | Live screen overflow → "Reset counters" was a no-op | **FIXED** 2026-08-01 | `onClick = { showOverflowMenu = false }` only closed the menu. `PipelineStats.reset()` already existed and is used internally on reconnect (`clearSessionState()`); added `PipelineService.resetStatsCounters()` and wired the menu item to call it |
 | Settings screen "Close" (✕) and "Done" buttons were both no-ops | **FIXED** 2026-08-01 | The public `SettingsScreen()` composable never declared an `onBack` parameter, so the private content composable's `onBack: () -> Unit = {}` always used its empty default — tapping either control did nothing, on the exact two actions ("Close", "Done") the audit was asked to verify. Added the parameter, wired at the `MainActivity` call site to navigate back to the Live tab using the same `popUpTo`/`launchSingleTop`/`restoreState` pattern already used for every other bottom-nav move in that file |
 | History screen "Clear" has no confirmation | **Flagged, not changed** 2026-08-01 | Irreversibly deletes all Room-backed aircraft history on a single tap, unlike the Offline Maps delete flow (`DeleteConfirmDialog`) or Receiver's STOP-while-running (`AlertDialog`), which both confirm. Left as-is pending a product decision — could be intentional given the list regenerates from live traffic |
-| `AircraftDetailScreen.kt` (356 lines) is dead code | **Flagged, not changed** 2026-08-01 | Defined but never called from production code — superseded by `AircraftDetailSheet` (the bottom sheet), per `MapScreen.kt`'s own comment: "there is one detail implementation, not a second one living on the map." Only other reference is a historical note in `PHASE_PROGRESS.md`. Left in place pending confirmation it's safe to delete |
+| `AircraftDetailScreen.kt` (356 lines) is dead code | **FIXED (deleted)** 2026-08-21 | Re-confirmed zero production references (grep), then deleted. Superseded by `AircraftDetailSheet` since it was first flagged 2026-08-01 |
 
 ---
 
@@ -3157,3 +3157,675 @@ over wireless ADB (paired earlier this session at §60's investigation).
 Not yet manually verified in the app — History's overflow menu/group-by,
 the Coverage polar/label fixes, and the Stats airline reclassification all
 need a look on-device to confirm the intended UI matches what's live.
+
+## 62. Live-list row greying bound to the drop-aircraft threshold, not a fixed 15s (2026-08-18, v2.3.0)
+
+Avi noticed a live (not-yet-departed) row sitting greyed out and asked what
+drives it. Root cause: `AircraftRow.kt`'s `rowAlpha` dims to 0.6 once
+`AgeTier` hits `STALE`, and `UiMapper.kt` set that at a fixed 15s regardless
+of the separate, user-configurable "Drop aircraft after (seconds)" setting
+(`AppConfig.aircraftExpirySeconds`, default 60s, unbounded text field, no
+code-enforced max) — so a row could sit visibly greyed for most of its live
+lifetime before actually departing to History.
+
+First pass tried a hardcoded huge constant to kill `STALE` outright, but
+that's not safe against `aircraftExpirySeconds` being raised past it later
+(no bound exists) — so instead, per Avi's direction: `mapRow()` now takes
+`dropAfterSeconds` and computes the ageing threshold as
+`(dropAfterSeconds + 1) * 1000L` rather than a fixed constant. `STALE` can
+still fire, but only in the up-to-30s window between an aircraft crossing
+the drop threshold and the periodic expiry sweep (`PipelineService.kt`'s
+30s loop) actually removing it — not for most of the row's life like
+before. `mapMarker()`'s `isStale` (drives map-marker fading, shared the
+same removed constant) bound the same way for consistency.
+`MainViewModel.kt`'s two call sites now pass `cfg.aircraftExpirySeconds`.
+
+`AircraftDetailSheet.kt` has its own separate, untouched copy of these
+thresholds (5s/15s, drives per-field freshness dots on the detail sheet) —
+not part of this ask, left as-is.
+
+Full suite + `:app:compileDebugKotlin` pass. Built into v2.3.0 (§63).
+
+## 63. Live tab redesigned end to end (2026-08-19, v2.3.0)
+
+Avi drove this interactively over many rounds — pulled a real on-device
+screenshot, iterated a mockup with `ui-ux-pro-max:design` through several
+passes, then said "build the app with this design." What shipped, all in
+`app/src/main/java/com/laviavi/adsbandroid/ui/`:
+
+**Status strip (`components/StatusStrip.kt`, global, sits above the
+NavHost in `MainActivity.kt` — applies to every tab, not just Live).**
+Replaced the old "● RUNNING · --- · uptime · msgs/s · CRC x%" line with the
+dongle's own name (`R828D` etc., already available as `sourceName` but
+previously unused here) plus the USB icon, colored green when
+`ReceiverState.RUNNING` and red for every other state — Avi's explicit
+"green when running, red when not" rule, deliberately binary unlike the
+card's own background/border tinting which keeps its finer per-state
+colors. `RUN TIME` / `FRAMES/S` / `VALID` follow as small labelled fields
+(label above value, same convention as the row's old DIST/ALT/TRACK
+columns). Dropped `gainDb`/`crcPercent` — both were already
+`StatusStrip.kt`-only fields, so they came out of `ReceiverStatusUi`
+entirely rather than left dead. `crcPercent`'s underlying value
+(`windowAcceptRatePercent`) was already identical to the metrics panel's
+"valid%" — same number, two different labels — so this also quietly fixed
+a pre-existing mislabel, not just decluttered.
+
+**Top bar (`text/LiveScreen.kt`'s `LiveTopBar`).** Removed the tuner chip
+(now redundant with the status strip showing the same dongle name) — Avi
+caught the duplication directly. Title left-aligns now that there's
+nothing on the left to center it against.
+
+**Metrics panel gone entirely.** The frames/s + valid% + max-range 3-card
+grid, the 60s sparkline, and the collapse chevron are deleted — frames/s
+and valid% moved into the status strip above, and max-range was
+deliberately left out per Avi's literal 3-field spec (flagged at the time,
+confirmed dropped, not lost — see §64 for where it might resurface). This
+took `LiveMetrics.kt`, `MetricTile.kt`, `Sparkline.kt`,
+`MainViewModel.liveMetrics`/`metricsCollapsed`/`_sparklineBuffer`, and
+`UiMapper.mapMetrics()` out entirely — all single-purpose to this one
+panel, confirmed via grep before deleting, not just orphaned.
+
+**Aircraft row (`text/AircraftRow.kt`, full rewrite).** ICAO no longer
+displayed (stays in `AircraftRowUi`/the data model for every other screen
+— Avi was explicit: hide, don't remove). Tail number now leads line 1
+(was callsign), with route moved onto that same line instead of its own —
+callsign drops to line 2 alongside type. The `~` provenance mark
+(`DataSource.NETWORK`) is gone from `ProvenanceMark()` — Avi doesn't use
+it — while `*`/`•` (ALGORITHMIC/DATABASE) stay. The right-hand data block
+is no longer the old fixed-dp DIST/ALT/TRACK tracks with header captions
+sitting only next to the top two lines — it's now a content-width column
+vertically centered against the row's full height, unlabelled (distance's
+`mi` suffix, altitude's `FL`/`ft` shape, and a new small rotated-triangle
+arrow next to the bearing degree carry the meaning that headers used to).
+The "TRACK" mislabel Avi caught (it was always bearing-from-observer, not
+the aircraft's own heading — `state.bearingDeg`, not `state.trackDeg`) is
+moot now that there's no header at all; the bearing/heading semantic
+question itself is still open, unchanged, data-wise.
+`AircraftRowLayoutTests.kt` rewritten for the new contract (data block's
+right edge — not three separate column left edges — aligns across rows;
+row height still must match; gutter still must survive) — the old
+DIST/ALT/TRACK fixed-width assertions no longer apply, this isn't a
+regression, it's the same discipline (assert the real contract) pointed at
+the new design.
+
+**Filters (`text/LiveScreen.kt`).** The always-visible, horizontally-
+scrolling 6-chip row is gone. A small funnel icon now sits inline in the
+sort/count row — outline and unbadged with nothing active, filled blue
+with a count badge once 1+ are on, tap opens a dropdown with checkable
+Airborne/On ground/Emergency items. Position/&lt;50mi/altitude-band are no
+longer exposed in the UI (Avi: "remove <50mi, position and any altitude")
+but `LiveFilters`'s fields for them are untouched — same hide-don't-remove
+call as ICAO. When 1+ filters are active, a slim removable-chip strip
+auto-appears below the sort row; otherwise the row costs nothing.
+
+Full suite + `:app:compileDebugKotlin` + `:app:assembleDebug` pass.
+Version bumped to v2.3.0 (`versionCode` 47 — Avi: "bump the version by
+0.1"). Installed on the Samsung SM-S928B over the Tailscale ADB connection
+established earlier this session. Verified live on-device via screenshot:
+confirmed the status strip (red USB icon + "ERROR" — the phone had no
+dongle attached at the time, an unrelated real state) and the rest of the
+chrome render correctly, no crash. **Not verified**: the row-level and
+filter-menu changes specifically, since that screenshot was taken in the
+receiver-error empty state (no aircraft, no rows, filter row hidden by the
+same `sourceState is Running`-gated condition it always used) — needs a
+real session with traffic to confirm visually.
+
+## 64. Coverage LIVE now accumulates for the app's run; ALL-TIME gets a manual reset (2026-08-19, v2.3.1)
+
+Avi asked about the Coverage card's "live" window while reviewing the Live
+redesign, and the answer led to a real bug: `_coverage.value` was a fresh
+10-second snapshot of whichever aircraft are *currently* tracked
+(`CoverageMetrics.computeRow(..., currentPositionedAircraft())`,
+`PipelineService.kt`'s 10s loop) — the instant an aircraft aged out of the
+live list or the dongle reconnected, its sector's contribution vanished
+with it. Avi: "that's very bad." Planned in Plan Mode (background Explore
+agent traced the full data flow first — `recordCoverageSample()`'s actual
+5-minute cadence, `clearSessionState()` confirmed to never touch coverage,
+`synthesizeAllTimeRow()`'s unconditional full-history aggregation, and the
+complete absence of any reset action anywhere in the app), approved, then
+built:
+
+- **`core/receiver`'s `CoverageMetrics.kt`** — new
+  `accumulateSectorTotals(running, tick)`, a pure merge (count sums, max
+  range takes the larger) reusing the exact `SectorTotal` shape and
+  SUM/MAX semantics `synthesizeAllTimeRow` already uses for the DB-backed
+  all-time view — same simplification, one aggregation scheme, not two.
+  4 new unit tests in `CoverageMetricsTests.kt`.
+- **`PipelineService.kt`** — new `liveSectorTotals: List<SectorTotal>`
+  field, deliberately never added to `clearSessionState()`'s reset list —
+  since the service lives for the whole app process, that alone gives both
+  halves of what Avi asked for for free: survives every reconnect (nothing
+  in that path touches it), resets only when the app itself restarts (a
+  new process means a new service instance). The 10s loop now merges each
+  tick into that field and republishes the synthesized accumulated row,
+  instead of publishing the raw tick.
+- **ALL-TIME reset** — `CoverageSampleDao.clearAll()` (new `DELETE FROM
+  coverage_samples`, no schema change), `PipelineService.resetAllTimeCoverage()`
+  (clears the table, sets `_allTimeCoverage.value = null` directly rather
+  than routing through `refreshAllTimeCoverage()` — an empty table still
+  produces a valid all-zero row from `synthesizeAllTimeRow`, which would
+  show a degenerate chart instead of the card's existing "No coverage
+  history yet" empty state). A small red "Reset" button appears next to
+  the LIVE/ALL-TIME toggle only in ALL-TIME mode, behind a new
+  `ResetCoverageConfirmDialog` (`PipelineConfirmDialogs.kt`, same
+  AlertDialog pattern as Stop/Reconnect/Exit) since it's irreversible.
+  Scoped to `coverage_samples` only — `best_range_record` is a separate
+  feature, untouched.
+- **Incidental bug fix, found while reading the migration chain for this
+  work, unrelated to coverage itself**: `AppModule.kt`'s production
+  `Room.databaseBuilder` registered migrations only through `MIGRATION_8_9`
+  — `MIGRATION_9_10` (added in §56/v2.2.1 for
+  `GlobalAircraftImportEntity.errorMessage`) was never added to the actual
+  `.addMigrations(...)` chain, only to the test file's separate in-memory
+  builders. Any real device still on schema v9 would have hit Room's "no
+  migration found" crash on next launch. One-line fix, added in the same
+  change since it was found while touching adjacent migration code.
+
+Full suite (`core/receiver:test` + `app:testDebugUnitTest`) +
+`:app:compileDebugKotlin` + `:app:assembleDebug` all pass. Built and
+installed as v2.3.1.
+
+## 65. Operator field no longer conflates registry owner with confirmed airline (2026-08-19/20, v2.3.1)
+
+N116AN showed operator "UMB BANK NA TRUSTEE" (the global-DB `owner` field)
+instead of "American Airlines" — Avi caught this, then walked the
+investigation back from three wrong explanations (a race condition; "the
+schema only has one field"; a stale re-enrichment race) to the real one:
+`AircraftManager.setAircraftMeta()` had no check at all that a registry
+`owner` value actually named an airline before writing it into the shared
+`operator` field. Root requirement, quoted from this doc: **"FlightAware
+scrape overrides all other sources for type/airline/route."** `setFaResult()`
+already honored that; `setAircraftMeta()` didn't need to — until a message
+after FA resolved could still let a later owner lookup clobber it.
+
+Fix, per Avi's spec (get both sources; FA-airline wins when present; else
+owner, explicitly marked as owner; distinguish the two everywhere the value
+is surfaced):
+
+- **`core/receiver`'s `enrich/Enrichment.kt`** — new `enum class OperatorKind
+  { AIRLINE, OWNER }`. `OfflineEnrichment.Result.operatorKind` tags a
+  callsign-prefix match as `AIRLINE`.
+- **`aircraft/AircraftState.kt`** — new `operatorKind: OperatorKind?` field,
+  tracked alongside `operator`/`operatorSource` everywhere they're set.
+- **`aircraft/AircraftManager.kt`** — `setAircraftMeta()` now guards: an
+  `owner` value only overwrites `operator` when the existing value isn't
+  already tagged `AIRLINE`. `setFaResult()` keeps its unconditional
+  overwrite (the spec above) and tags the result `AIRLINE` when an airline
+  name came back.
+- **Surfaced everywhere the value appears**: `AircraftDetailSheet.kt` and
+  `AircraftRow.kt` append `" (owner)"` when `operatorKind == OWNER`;
+  `aircraft_seen`'s CSV export (`CsvExporter.kt`) gets a new `operator_kind`
+  column (`owner`/`airline`/blank); History's `aircraft_visits.isAirline`
+  and Stats' airline classification now read the authoritative
+  `operatorKind` instead of the callsign-prefix heuristic
+  (`Airlines.matchesKnownAirlineName()`, now dead and deleted along with its
+  tests).
+- **DB**: `aircraft_seen.operatorIsOwner` (v10→v11, `MIGRATION_10_11`).
+
+Verified against real, live data before fixing: a real `curl` fetch of
+FlightAware's N116AN page (AAL1578, BOS→LAX, American Airlines, A321) and a
+real on-device SQLite query of `global_aircraft` (owner "UMB BANK NA
+TRUSTEE", no airline field exists in that table at all) — confirming owner
+and airline are different fields from different sources, not a stale copy
+of the same one.
+
+**Not yet confirmed on-device visually** — build/tests pass, but no live or
+recently-departed aircraft has been checked on-screen to confirm the
+"(owner)" suffix and the airline-wins behavior actually render as designed.
+
+## 66. Map tab needed a zoom to show markers; Coverage's AIRCRAFTS mode showed range text; ALL-TIME histogram was always empty (2026-08-20)
+
+Three bugs reported in one pass, each independent:
+
+- **Map (`ui/map/MapScreen.kt`)**: switching to the Map tab left it blank
+  until a pinch zoom. Root cause: MapLibre's GL renderer doesn't reliably
+  repaint on a `GeoJsonSource`-only update (`aircraftSource.setGeoJson(...)`)
+  — it only redraws on the next camera event, and nothing forces one on tab
+  entry. Fix: `map.triggerRepaint()` right after every `AircraftMapLayer.update()`
+  call, confirmed present in the MapLibre 12.0.0 SDK jar.
+- **Coverage card, AIRCRAFTS mode (`ui/receiver/ReceiverScreen.kt`)**: the
+  "Best"/"Worst" sector lines always showed a range value and always picked
+  the sector by range median (`row.bestSector`/`row.worstSector`), even when
+  the toggle was on AIRCRAFTS — contradicting the polar and the toggle right
+  above them. Fix: in AIRCRAFTS mode, pick the sector by count
+  (`row.sectors[...].count`) and display the count, not the range.
+- **Coverage card, ALL-TIME altitude histogram (`ReceiverScreen.kt`'s
+  `AltitudeHistogram`)**: always empty. Root cause:
+  `CoverageMetrics.synthesizeAllTimeRow()` hardcoded
+  `altitudeCounts = AltitudeBand.entries.associateWith { 0 }` — the DB-backed
+  `coverage_samples` table (and the in-memory LIVE accumulator built on the
+  same function) never carried altitude data at all, only sector/range.
+  This meant LIVE mode's histogram was equally broken, just unreported.
+  Fix, mirroring the existing sector-accumulation pattern:
+  - `core/receiver`'s `CoverageMetrics.kt` — `synthesizeAllTimeRow()` takes
+    an optional `altitudeCounts: Map<AltitudeBand, Int>` (default empty, so
+    every existing caller still compiles); new pure
+    `accumulateAltitudeCounts(running, tick)`, same SUM-forever shape as
+    `accumulateSectorTotals`. 5 new unit tests.
+  - New `altitude_samples` table (`AltitudeSampleEntity`/`AltitudeSampleDao`,
+    `SUM(count) GROUP BY band`), v11→v12 (`MIGRATION_11_12`) — the same
+    per-tick-when-nonzero write pattern as `coverage_samples`, wired into
+    `AppModule.kt`'s migration chain and DAO providers.
+  - `PipelineService.kt`: new in-memory `liveAltitudeCounts` field (same
+    never-reset-except-by-process-restart lifetime as `liveSectorTotals`)
+    for LIVE mode; `recordCoverageSample()`/`refreshAllTimeCoverage()`
+    persist and re-read `altitude_samples` for ALL-TIME mode;
+    `resetAllTimeCoverage()` now also clears `altitude_samples`.
+
+Full suite (`core/receiver:test` + `app:testDebugUnitTest`) +
+`:app:assembleDebug` all pass. Built and installed as v2.3.2.
+
+## 67. Map's blank-until-tap bug traced to a real SDK race, not just a missing repaint; History gets a real date stamp and per-group collapse (2026-08-20)
+
+The v2.3.2 `triggerRepaint()` fix (§66) turned out insufficient — Avi
+reported the map still shows nothing until the first tap, every time.
+Investigated by decompiling the actual MapLibre 12.0.0 SDK classes rather
+than guessing further:
+
+- **Root cause**: MapLibre's renderer defaults to
+  `MapRenderer.RenderingRefreshMode.WHEN_DIRTY` — it only repaints when
+  explicitly marked dirty, and that mark is **dropped, not queued**, if the
+  GL surface hasn't finished being created yet. Every one of `MapScreen`'s
+  setup effects (camera, style, first marker population) fires within a
+  handful of Compose frames of a brand-new `MapView` being created — well
+  before Android has necessarily finished attaching the actual render
+  surface. `triggerRepaint()` re-issues the same racy call, so it didn't
+  help. A tap works because Android's touch dispatch reaches the renderer
+  through a path that isn't gated the same way, and by the time a human can
+  physically tap, the surface has always finished initializing.
+  `AdsbDestination.MAP.route` is a normal `NavHost composable{}`, fully
+  disposed and recreated on every tab visit — so this race replays every
+  single time, matching "persistent."
+- **Fix (`ui/map/MapScreen.kt`)**: `mapView.setRenderingRefreshMode(CONTINUOUS)`
+  at creation — a mode that can't drop a frame, closing the race outright —
+  then a `MapView.OnDidFinishRenderingMapListener` switches back to
+  `WHEN_DIRTY` the moment the SDK confirms the first real frame painted, and
+  unregisters itself. The extra render cost only lasts the brief per-visit
+  warm-up window, not the whole session.
+
+Also fixed while working through the same code, on Avi's list:
+
+- **History date-time stamp (`ui/history/HistoryScreen.kt`)**: `HistoryRow`'s
+  `TIME_FORMAT` was `HH:mm:ss` — time only, no date, despite
+  `CsvExporter.kt`'s `timestampFormat()` carrying a comment since §25 saying
+  it matches "the History screen's own display convention" of
+  `MM/dd/yyyy HH:mm` — a convention the screen itself had drifted from. Now
+  actually `MM/dd/yyyy HH:mm`, matching the CSV export and no longer
+  ambiguous now that Day/Weekday/Hour grouping can span many days.
+- **History group collapse (`ui/history/HistoryScreen.kt`)**: `GroupHeader`
+  is now clickable (▾/▸ + `"$label ($count)"`), toggling a
+  `collapsedGroups: Set<String>` keyed on the group's label; collapsed
+  groups skip their `items(...)` call entirely rather than being drawn and
+  hidden. Keyed on `groupBy` itself (`remember(groupBy) { ... }`) so
+  switching *how* it's grouped starts every group expanded again — a label
+  collapsed under "Airline" grouping is meaningless once regrouped by
+  "Day". The 6 near-identical per-`HistoryGroupBy`-case `LazyColumn` blocks
+  were also collapsed into one shared block (only the `groupBy` sorting
+  itself now differs case to case) — this made the collapse logic a single
+  add, not six.
+
+`:core/receiver:test` + `:app:testDebugUnitTest` + `:app:compileDebugKotlin`
+all pass. **Not yet built into a versioned APK or installed** — per Avi's
+instruction, more issues are queued before the next build.
+
+## 68. History's DAY grouping sorted groups alphabetically, not chronologically — today's group could rank below yesterday's (2026-08-20)
+
+Avi caught it live: "group by day, the most recent records are from
+yesterday... nothing from today." Root cause in `HistoryScreen.kt`: the DAY
+branch sorted its groups with `sortedByDescending { it.key }` — `it.key` is
+the *formatted display label* ("Wed, Aug 19", "Thu, Aug 20"), and that sort
+compares it as a plain string. Since the label starts with the weekday
+name, the order actually produced was alphabetical on "Mon/Tue/Wed/…", not
+calendar-recency — "Wed" > "Thu" lexicographically ('W' > 'T'), so a
+Wednesday group could rank above a more recent Thursday group whenever the
+two weekday names happened to compare that way. Today's data was still
+there — it was silently sorted underneath yesterday's, not missing.
+
+Fix: sort by each group's own most-recent `lastSeenMs` (an actual
+timestamp) instead of its label string — `entries.sortedByDescending {
+entry -> entry.value.maxOf { it.lastSeenMs } }`. WEEKDAY is unaffected (it
+already sorts by a fixed Monday→Sunday index, not the label, and is
+deliberately a day-of-week *pattern* view rather than calendar-recency).
+HOUR groups by hour-of-day across all dates merged together, by the same
+deliberate pattern-view design as WEEKDAY — not touched, not what was
+reported.
+
+`:app:compileDebugKotlin` + `:app:testDebugUnitTest` pass. Not yet built or
+installed.
+
+## 69. Map callsign labels never appeared at any realistic tracking range (2026-08-20)
+
+Avi: "the callsign don't show next to the airplanes." Root cause in
+`AircraftMapLayer.kt`: the non-selected-aircraft label layer (`LYR_LABELS`)
+had `setMinZoom(LABEL_MIN_ZOOM)` = 9.0 — but running `MapScreen.kt`'s own
+`computeZoom()` against every `RangeStep` shows the app almost never
+reaches that zoom level at any range wide enough to be useful:
+
+| Range step | Computed zoom |
+|---|---|
+| 3–6 mi | ~12.0 |
+| 6–12 mi | ~11.0 |
+| 12–25 mi | ~9.9 |
+| 25–50 mi (default) | ~9.1 |
+| 50–100 mi | ~8.3 — below the gate |
+| 100–250 mi | ~6.6 — below the gate |
+
+At 50 mi or wider — the realistic range for a ground station, not the
+zoomed-way-in edge case the gate seems to have been written for — ordinary
+aircraft callsigns could never appear, regardless of the "Callsign labels"
+toggle. Only a *selected* aircraft's label bypassed this (separate
+always-shown layer, no zoom gate), which is why the map wasn't fully
+unlabeled — just silently unlabeled for everything not tapped.
+
+Fix: removed the zoom gate entirely (`LABEL_MIN_ZOOM` constant deleted too,
+now unused). The layer already declares `textAllowOverlap(false)` /
+`textIgnorePlacement(false)`, so MapLibre's own collision system already
+prevents label clutter at low zoom without an extra hardcoded floor — the
+gate was redundant protection against a problem the SDK already handles,
+and the redundant copy is what broke the toggle's own promise.
+
+`:app:compileDebugKotlin` + `:app:testDebugUnitTest` pass. Not yet built or
+installed.
+
+## 69b. §69's real fix: the map wasn't racing a render mode, it was blocked entirely by a broken default font (2026-08-20, v2.3.4)
+
+§69 shipped as v2.3.3 and made things *worse* — Avi: "the map now shows no
+airplanes at all." First attempt at explaining it (toggling
+`MapRenderer.RenderingRefreshMode` between `CONTINUOUS`/`WHEN_DIRTY`) was
+wrong and got reverted; the actual root cause needed device evidence, not
+more theorizing from source alone:
+
+- Added temporary `DEBUG-map1` logging at three points (`PipelineService`,
+  `MainViewModel.mapMarkers`, `MapScreen`'s marker-update effect) and
+  confirmed via logcat, independent of the phone's screen: the receiver had
+  11-12 positioned aircraft, the ViewModel produced 11-12 markers, and
+  `AircraftMapLayer.update()` reported `shown=11/12` every single tick —
+  the entire data pipeline was correct. The bug was purely in the render
+  layer.
+- Fetched all 4 OpenFreeMap style JSONs (`liberty`/`bright`/`positron`/`dark`)
+  directly and diffed them against MapLibre's own SDK-level default
+  `text-font` (used by any `SymbolLayer` that doesn't set one explicitly):
+  the SDK default is `"Open Sans Regular,Arial Unicode MS Regular"`, but
+  every one of OpenFreeMap's styles — confirmed live, curling their glyph
+  endpoint — 404s on that font and serves `Noto Sans Regular`/`Bold`/`Italic`
+  instead (which do 200). None of `AircraftMapLayer`'s five `SymbolLayer`s
+  (`LYR_RING_LABEL`, `LYR_AIRCRAFT_ICONS`, `LYR_LABELS`, `LYR_LABELS_ALWAYS`,
+  `LYR_CLUSTER_COUNT`) ever called `textFont(...)`, so they all silently
+  inherited the broken default.
+- MapLibre computes symbol placement/collision once per source-tile across
+  every symbol layer reading that source — a stuck/failed glyph fetch for
+  one text-bearing layer can withhold the *whole* shared source's symbols
+  from rendering, icon-only layers included. `LYR_AIRCRAFT_ICONS` shares
+  `SRC_AIRCRAFT` with the two label layers, so it went down with them.
+- This also explains the timing: §69's `LABEL_MIN_ZOOM` removal made
+  `LYR_LABELS` active at every zoom for the first time (previously it never
+  rendered below zoom 9, i.e. never at any range wide enough for real
+  tracking) — so the glyph dependency, and the shared-source stall it
+  causes, had never actually been hit before that change.
+- Fix: `AircraftMapLayer.kt` now sets `textFont(arrayOf("Noto Sans Regular"))`
+  explicitly on all four text-bearing layers (`textFont` constant added to
+  the companion object). Confirmed on-device on a fresh install: aircraft
+  icons with altitude labels render within 10 seconds of first opening the
+  tab, no tap or zoom needed.
+
+Verified visually end-to-end this time (build → install → screenshot),
+not just by test suite — the device screen locking mid-session (a real
+security lock, `deviceLocked=1`) blocked visual verification for a while;
+per standing policy that wasn't bypassed, and work continued via logcat
+until Avi unlocked it.
+
+## 71. Map label polish: spacing, full altitude digits, a real destination-parsing bug, and label flicker (2026-08-20/21, v2.3.7)
+
+Four issues reported against the new configurable map labels (§70):
+
+1. **Label too close to the icon.** `textOffset` on the label layer(s) was
+   `(0.9f, 0.9f)` em — inside the plane icon's own ~12dp radius at that
+   text size, so label and symbol visually overlapped. Raised to
+   `(1.8f, 1.8f)`.
+2. **Altitude showing only 3 digits.** The label used the flight-level
+   shorthand (`altitudeFt / 100`, e.g. "140" for 14,000 ft) — correct
+   aviation convention, but indistinguishable from a genuine 3-digit reading
+   at a glance and not what was asked for. Changed to the full number,
+   comma-formatted (`"14,000"`).
+3. **Callsign takes a long time to appear.** Investigated, not a bug: a
+   callsign only exists once a DF17 identification message (TC 1-4) has been
+   received and decoded, and those transmit far less often than position
+   messages — `AircraftManager` assigns `state.callsign` directly off the
+   decoded message with no cache or debounce in between. Confirmed
+   on-device: it does eventually appear (~20-30s into a fresh session),
+   consistent with genuine decode latency, not a stuck value.
+4. **Destination never shows.** Real bug, and the actual root cause of the
+   *previous* "destination not shown" report too (§70 shipped the toggle,
+   not a working extractor). `AircraftState.route` comes from two
+   enrichment sources with two different formats — adsbdb's
+   `"ORIGIN-DEST"` (`RouteEnrichment.parseAdsbdbRoute`) and FlightAware's
+   `"ORIGIN → DEST"` (`PipelineService.maybeEnrichFa`) — and FA is the
+   *more commonly populated* source in practice (it's also what the Live
+   row and History display directly, arrow and all). `UiMapper`'s
+   destination extraction only ever split on `-`, so it silently returned
+   nothing for the arrow-formatted routes that make up most real traffic.
+   `HistoryScreen`'s origin/destination grouping (added in §63) had the
+   exact same bug, independently — every aircraft with an FA-sourced route
+   was falling into "Unknown". Fixed both from one shared root: new
+   `core/receiver` `RouteParsing.kt` (`routeOrigin()`/`routeDestination()`,
+   handling both separators, 6 new unit tests), used by both `UiMapper.kt`
+   and `HistoryScreen.kt`'s origin()/destination() extensions.
+
+A fifth issue, caught live mid-fix and not on Avi's original list: **aircraft
+symbols/labels blinking.** Two distinct causes, found in sequence:
+
+- First pass: `markerFeature()` built each `Feature` via
+  `Feature.fromGeometry(geometry)` with no feature `id` — every
+  `setGeoJson()` refresh (every ~500ms, `mapMarkers`' sample rate) looked
+  like an entirely new, unrelated feature set to MapLibre rather than an
+  update to existing ones. Fixed by passing a stable `id` (the ICAO hex)
+  via the 3-arg `Feature.fromGeometry(geometry, properties, id)` overload
+  (confirmed present in the SDK jar before using it) — this stabilized icon
+  rendering, but Avi reported the label text was still blinking after
+  installing it.
+- Actual cause, found by capturing a rapid screenshot burst and diffing
+  frames directly (not just reasoning from source): the aircraft icon held
+  its position between two consecutive frames while its label
+  ("AAL2944 15,925 LAX") vanished entirely — that vanish/reappear cycle
+  *was* the report. Root cause: `LYR_LABELS` used `textAllowOverlap(false)`
+  (collision-managed placement, with a separate `LYR_LABELS_ALWAYS` bypass
+  layer for selected/RA/emergency only) — MapLibre recomputes label
+  collision from scratch on every `setGeoJson()` call, and with aircraft
+  packed close together, which label wins the overlap fight can flip
+  between refreshes even when nothing meaningful changed. Fixed by merging
+  the two layers into one, always-shown (`textAllowOverlap(true)`,
+  `textIgnorePlacement(true)`) — trading occasional label overlap in a
+  dense cluster for stability, which reads far better on a live-updating
+  map than flicker. `LYR_LABELS_ALWAYS`/`PROP_ALWAYS_LABEL` deleted
+  entirely (confirmed dead via grep).
+- Verified with real evidence both times, not just re-reading the diff:
+  installed on-device, confirmed the app was actually running the new
+  build (`versionCode`/`lastUpdateTime` via `dumpsys package`), then a
+  6-shot rapid screenshot burst — near-identical file sizes and pixel
+  content frame to frame (vs. visibly different sizes and a
+  disappearing/reappearing label in the pre-fix burst) — plus an 8-second
+  `adb shell screenrecord` clip sent to Avi directly for his own
+  in-motion confirmation, since a static screenshot can't fully prove a
+  timing artifact is gone.
+
+All four of Avi's original items confirmed visually on-device (label
+spacing, full altitude digits, and "LXJ455 29,000 LAS" / "TAI563 37,000
+SAL" — callsign + altitude + destination together).
+
+`:core/receiver:test` + `:app:testDebugUnitTest` + `:app:compileDebugKotlin`
+all pass. Built and installed as v2.3.7.
+
+## 70. Map aircraft labels are now user-composable (callsign/altitude/destination), not a fixed format (2026-08-20)
+
+Avi: "add other options to the aircraft label like height, destination,
+callsign." The old label was hardcoded to callsign + altitude with a single
+on/off switch (`mapShowLabels`); no way to add or drop either piece, or add
+destination.
+
+- New `enum class MapLabelField { CALLSIGN, ALTITUDE, DESTINATION }`
+  (`ui/map/MapLabelField.kt`).
+- `AppConfig.mapShowLabels: Boolean` → `mapLabelFields: Set<MapLabelField>`
+  (default `{CALLSIGN, ALTITUDE}`, matching the old fixed behavior). An
+  empty set replaces the old "off" state — no separate boolean needed, and
+  no way for the two to disagree with each other.
+- `UiMapper.mapMarker()` takes the selected set and builds the label by
+  space-joining whichever fields are present (destination pulled from
+  `state.route`, "ORIGIN-DEST", same parsing convention as History's
+  origin/destination grouping). RA still always appends regardless of
+  selection — it's a safety advisory, not a display preference.
+- `AircraftMapLayer`'s `showLabels` param removed entirely — `m.label`
+  itself is already `null` when nothing applies, so the extra gate was
+  redundant now that an empty selection is expressible at the source.
+- `MapScreen.kt`'s Layers panel: the single "Callsign labels" row replaced
+  with a "LABEL CONTENT" section, one checkbox per `MapLabelField`.
+- `AppConfigStore`: `map_show_labels` boolean key replaced with
+  `map_label_fields` (comma-joined enum names, same pattern as
+  `mapRingRadiiMi`). DataStore Preferences, not Room — no migration needed,
+  the old key is simply orphaned and ignored.
+
+`:app:compileDebugKotlin` + `:app:testDebugUnitTest` pass. Not yet built or
+installed.
+
+## 72. Global-safe callsign fallback for map labels; §52's History gap actually found and fixed; History fold-all (2026-08-21)
+
+Three items, code-only this session — no APK build, per Avi's instruction
+(more enhancements queued before the next install):
+
+- **Map label callsign fallback.** Avi asked what to do about aircraft on
+  the map with no callsign yet, then caught that my first answer
+  (fall back to `Registration.fromIcao()`) was US-only —
+  `core/receiver/enrich/Registration.kt`'s own docstring says so
+  explicitly ("Supports US civil aircraft... only; every other block
+  returns null"), which doesn't generalize to a receiver meant to run
+  anywhere in the world. Corrected: fall back to `state.registration`
+  instead, which is already resolved offline-first from the on-device
+  `global_aircraft` mirror (`AircraftMetaEnrichment.lookup()`, §55) — a
+  worldwide ADS-B Exchange snapshot, not a US-only algorithm — then to the
+  bare ICAO hex as a universal last resort. `UiMapper.mapMarker()`'s
+  CALLSIGN field now always adds something once the field is selected:
+  `callsign ?: registration ?: icao`.
+- **§52's "live aircraft missing from History" — actual root cause found.**
+  Avi asked, independently, whether Live/History omit aircraft they can't
+  get information for; they don't (checked both: Live's filter chips never
+  touch identity fields, `recordDeparted()` writes unconditionally with
+  only `icao` required) — but reading the departure path top-to-bottom to
+  answer that turned up the real bug §52's still-active debug logger has
+  been hunting since 2026-08-15. `AircraftManager.reset()` — called by
+  `ReceiverRepository.reset()`, in turn called from
+  `PipelineService.clearSessionState()` on Start, Reconnect, or a dongle
+  replug — cleared the live aircraft table directly with no departed
+  callback at all. Any aircraft still being tracked at that exact moment
+  was silently dropped and never written to `aircraft_seen`, no DB failure
+  or dead loop involved (§52's two original hypotheses) — a third
+  mechanism neither had considered. Fixed: `ReceiverRepository.reset()` now
+  snapshots the still-tracked aircraft and reports them via `onDeparted`
+  (identical treatment to an expiry sweep) before clearing the table. 2 new
+  tests (`ReceiverRepositoryTests.kt`) cover both the populated and empty
+  cases. `HistoryDebugLogger`/the TEMP DEBUG instrumentation deliberately
+  left in place, not removed yet — this needs a real on-device
+  Start/Reconnect-with-live-traffic cycle to confirm `VANISHED_NOT_IN_HISTORY`
+  stops firing before that instrumentation is safe to retire.
+- **History fold-all.** Avi: group-by can produce a lot of categories,
+  needs to fold them all at once rather than one header tap at a time.
+  `HistoryScreen.kt`'s per-group grouping computation (previously inline
+  inside the `LazyColumn` block) hoisted into a `remember(sorted, groupBy)`
+  above the list, so a new "Collapse all"/"Expand all" `TextButton` in the
+  filter/sort/group row can read the same group set without recomputing
+  it. Shown only when grouped into more than one category — toggles based
+  on whether every group is currently collapsed.
+
+`:core/receiver:test` + `:app:testDebugUnitTest` + `:app:compileDebugKotlin`
+all pass. No APK built.
+
+## 73. ErrorLog wired into Logs (opt-in toggle); session max range restored; map label clarity; dead code deleted (2026-08-21, v2.3.8)
+
+Four items from the open-items review, all approved to do now:
+
+- **`pipeline/ErrorLog.kt` surfaced in the Logs tab, behind an off-by-default
+  toggle.** `LogsScreen.kt` now reads both `MainViewModel.diagnosticEvents`
+  (unchanged) and `ErrorLog.entries` (previously logcat-only, §72's finding),
+  merged into one time-sorted list via a small shared `LogRow` shape both
+  sources adapt into. The "Pipeline error log" `Switch` is local Compose
+  state — off every time the screen opens, not persisted to `AppConfig` —
+  matching Avi's own framing ("I don't want to run it all the time"). It
+  only gates *display*; `ErrorLog`'s own capture is unconditional and
+  unchanged, same as before.
+- **Session max range restored**, on the Receiver tab's Coverage card
+  ("Session max," next to "Best ever"). `PipelineService.sessionMaxRangeNm`
+  was already being computed correctly throughout the Live redesign (§63)
+  but `MainViewModel` only ever wrote to its private backing field — no
+  public `StateFlow` was ever exposed, so nothing could read it. One-line
+  fix (`_sessionMaxRangeNm.asStateFlow()`) plus wiring through
+  `ReceiverScreen`'s `CoverageCard`.
+- **Map Layers panel: "Ground traffic" → "Show ground aircraft"** — Avi's
+  own suggestion from when this was flagged as unclear (§69's answer).
+- **`AircraftDetailScreen.kt` deleted** — re-confirmed zero production
+  references (grep) before deleting; flagged as dead code since 2026-08-01
+  (§5), left in place pending confirmation until now.
+
+`:core/receiver:test` + `:app:testDebugUnitTest` + `:app:compileDebugKotlin`
+all pass. Built and installed as v2.3.8.
+
+## 74. Map selection sheet drops ICAO, gains route; Live row long-press jumps straight to map (2026-08-29)
+
+Two items from Avi.
+
+**Map selection sheet.** `SelectionSheet` (`MapScreen.kt`) led with
+`marker.icao` — Avi: drop it, show the tail number and route instead.
+`MapMarker` gained `registration`/`route` fields (populated in
+`UiMapper.mapMarker()` from `state.registration`/`state.route`, both
+already resolved upstream — no new enrichment). The header now leads with
+`registration ?: callsign` (mirrors `AircraftRow`'s own primary-field
+fallback), with callsign demoted to a secondary label only when
+registration led, exactly as the Live row already does; a new line below
+shows `marker.route` when present. `marker.icao` remains on the data class
+(still the marker's stable id/key) but nothing in the sheet renders it now.
+
+**Live row long-press.** `AircraftRowWithMenu` (`LiveScreen.kt`) previously
+opened a `DropdownMenu` on long-press with "Show on map" / "Copy ICAO".
+Avi: long-press should switch straight to the Map tab with that aircraft
+selected, no menu. `onLongClick` now calls `onShowOnMap` directly (already
+wired in `MainActivity.kt` to `viewModel.selectAircraft(icao)` +
+navigate-to-Map, unchanged); the menu and "Copy ICAO" are gone. Short
+click is unchanged (still opens the detail sheet).
+
+`:app:compileDebugKotlin` + `:app:testDebugUnitTest` pass. Built into
+v2.3.9 (§75/§76) — not yet verified on-device.
+
+## 75. Logs moved from the bottom nav into Settings (2026-08-29)
+
+Avi: "logs tab is not very useful, what do you think about making the logs
+parts of the settings instead." Agreed and built it, following the exact
+pattern `OfflineMapsSection`/`OfflineMapsScreen` already established for a
+diagnostic screen that shouldn't cost a bottom-nav slot.
+
+- `AdsbDestination.kt`: `LOGS` entry removed — the nav bar is now
+  Traffic/Map/Receiver/Settings, four items instead of five.
+- `LogsScreen.kt` gained its own `Scaffold`/`TopAppBar` with a back arrow
+  (`onBack: () -> Unit`) — it previously relied on being a bare bottom-nav
+  destination with no chrome of its own, which doesn't work once it's a
+  screen you navigate *into* from Settings and need a way back from. Content
+  (error-log toggle, event list) unchanged.
+- `MainActivity.kt`: `LOGS`'s `composable()` moved off `AdsbDestination.LOGS.route`
+  onto a new private `ROUTE_LOGS` sub-screen route, alongside the existing
+  `ROUTE_OFFLINE_MAPS` — same "reached from Settings, not the nav bar" comment
+  applied to both now.
+- `SettingsScreen.kt`: new `LogsSection` — a "Logs" `SettingsSection` with a
+  single "View logs" navigation row, styled identically to
+  `OfflineMapsSection`'s "Manage offline maps" row, placed after Data.
+
+`:app:compileDebugKotlin` + `:app:testDebugUnitTest` pass. Built into
+v2.3.9 (§76) — not yet verified on-device.
+
+## 76. v2.3.9 build + commit (2026-08-29)
+
+`versionCode` 55→56, `versionName` 2.3.8→2.3.9. `:app:assembleDebug`
+succeeds. This is also the first commit since v2.2.3 ([e101904]) — §62-§76
+(v2.3.0 through v2.3.9) had accumulated entirely uncommitted in the working
+tree; all landed in one commit at Avi's request rather than reconstructed
+into per-version commits after the fact.
+
+Install blocked this session: `adb devices -l` shows nothing, and
+`adb connect` to the phone's mDNS-discovered address
+(`192.168.0.150:38325`) fails outright rather than "actively refused" —
+see the summary for what that likely means and what's needed to unblock it.

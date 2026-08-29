@@ -51,6 +51,7 @@ fun SettingsScreen(
     onConfigChange: (AppConfig) -> Unit,
     modifier: Modifier = Modifier,
     onOpenOfflineMaps: () -> Unit = {},
+    onOpenLogs: () -> Unit = {},
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
     onRequestLocationPermission: () -> Unit = {},
     onBack: () -> Unit = {},
@@ -60,7 +61,7 @@ fun SettingsScreen(
     val gainOptions by viewModel.gainOptions.collectAsStateWithLifecycle()
     SettingsScreenContent(
         config, driverInstalled, gainOptions, onConfigChange,
-        onOpenOfflineMaps = onOpenOfflineMaps, onUpdateGps = onUpdateGps,
+        onOpenOfflineMaps = onOpenOfflineMaps, onOpenLogs = onOpenLogs, onUpdateGps = onUpdateGps,
         onRequestLocationPermission = onRequestLocationPermission, onBack = onBack,
         onExit = onExit, modifier = modifier,
     )
@@ -76,6 +77,7 @@ private fun SettingsScreenContent(
     onRequestLocationPermission: () -> Unit = {},
     onBack: () -> Unit = {},
     onOpenOfflineMaps: () -> Unit = {},
+    onOpenLogs: () -> Unit = {},
     onUpdateGps: (onResult: (Boolean) -> Unit) -> Unit = { it(false) },
     onExit: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -144,6 +146,7 @@ private fun SettingsScreenContent(
                     PowerSection(config, onConfigChange)
                     OfflineMapsSection(onOpenOfflineMaps)
                     DataSection(config, onConfigChange)
+                    LogsSection(onOpenLogs)
                     AboutSection()
                     ExitSection(onExit)
                 }
@@ -509,6 +512,29 @@ private fun OfflineMapsSection(onOpen: () -> Unit) {
         ) {
             Text(
                 "Manage offline maps",
+                style = MaterialTheme.typography.bodyMedium,
+                color = AdsbColors.TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            Text("›", style = MaterialTheme.typography.titleMedium, color = AdsbColors.TextSecondary)
+        }
+    }
+}
+
+@Composable
+private fun LogsSection(onOpen: () -> Unit) {
+    SettingsSection("Logs", "Decode events and the pipeline error log.") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, AdsbColors.Outline, RoundedCornerShape(8.dp))
+                .clickable(onClick = onOpen)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "View logs",
                 style = MaterialTheme.typography.bodyMedium,
                 color = AdsbColors.TextPrimary,
                 modifier = Modifier.weight(1f),

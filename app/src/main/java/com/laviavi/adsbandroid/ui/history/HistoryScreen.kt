@@ -2,6 +2,7 @@ package com.laviavi.adsbandroid.ui.history
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.laviavi.adsbandroid.aircraft.routeDestination
+import com.laviavi.adsbandroid.aircraft.routeOrigin
 import com.laviavi.adsbandroid.data.AircraftSeenEntity
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import java.text.SimpleDateFormat
@@ -39,12 +42,11 @@ enum class HistoryGroupBy(val label: String) {
     ORIGIN("Origin"),
 }
 
-/** [AircraftSeenEntity.route] is stored as "ORIGIN-DEST" (see RouteEnrichment.parseAdsbdbRoute). */
-private fun AircraftSeenEntity.origin(): String =
-    route?.substringBefore('-')?.takeIf { it.isNotBlank() } ?: "Unknown"
+// route may come from either adsbdb ("ORIGIN-DEST") or FlightAware ("ORIGIN → DEST")
+// — routeOrigin()/routeDestination() (core/receiver) handle both formats.
+private fun AircraftSeenEntity.origin(): String = routeOrigin(route) ?: "Unknown"
 
-private fun AircraftSeenEntity.destination(): String =
-    route?.substringAfter('-', missingDelimiterValue = "")?.takeIf { it.isNotBlank() } ?: "Unknown"
+private fun AircraftSeenEntity.destination(): String = routeDestination(route) ?: "Unknown"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -64,6 +66,9 @@ fun HistoryScreen(
     var showGroupMenu by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var globalDbStatus by remember { mutableStateOf<String?>(null) }
+    // Keyed on groupBy: switching how it's grouped makes the old collapsed labels
+    // meaningless (e.g. an "Airline" label collapsed, then Group switches to "Day").
+    var collapsedGroups by remember(groupBy) { mutableStateOf(setOf<String>()) }
 
     val filtered = remember(entries, filter) {
         if (filter.isBlank()) entries
@@ -86,6 +91,39 @@ fun HistoryScreen(
             HistorySortOrder.DISTANCE   -> filtered.sortedByDescending { it.distanceNm ?: -1.0 }
             HistorySortOrder.MESSAGES   -> filtered.sortedByDescending { it.messageCount }
             HistorySortOrder.CALLSIGN   -> filtered.sortedBy { it.callsign ?: it.icao }
+        }
+    }
+
+    // Hoisted above the list so the fold-all control (in the row below) and the
+    // LazyColumn both work off the same grouping — computed once either way.
+    val grouped = remember(sorted, groupBy) {
+        when (groupBy) {
+            HistoryGroupBy.NONE -> emptyList()
+            HistoryGroupBy.AIRLINE -> sorted
+                .groupBy { it.operator?.takeIf { o -> o.isNotBlank() } ?: "Unknown" }
+                .entries.sortedBy { it.key }
+            HistoryGroupBy.WEEKDAY -> {
+                val weekdayFmt = SimpleDateFormat("EEEE", Locale.getDefault())
+                val order = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+                sorted.groupBy { weekdayFmt.format(Date(it.lastSeenMs)) }
+                    .entries.sortedBy { order.indexOf(it.key) }
+            }
+            HistoryGroupBy.DAY -> {
+                // Sorted by each group's own most-recent timestamp, not by the label
+                // string — the label starts with a weekday name ("Wed, Aug 19"),
+                // and alphabetical order ("Wed" > "Thu") isn't calendar order, so a
+                // string sort silently put yesterday above today whenever the two
+                // weekday names happened to compare that way.
+                val dayFmt = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+                sorted.groupBy { dayFmt.format(Date(it.lastSeenMs)) }
+                    .entries.sortedByDescending { entry -> entry.value.maxOf { it.lastSeenMs } }
+            }
+            HistoryGroupBy.HOUR -> {
+                val hourFmt = SimpleDateFormat("HH:00", Locale.getDefault())
+                sorted.groupBy { hourFmt.format(Date(it.lastSeenMs)) }.entries.sortedByDescending { it.key }
+            }
+            HistoryGroupBy.DESTINATION -> sorted.groupBy { it.destination() }.entries.sortedBy { it.key }
+            HistoryGroupBy.ORIGIN -> sorted.groupBy { it.origin() }.entries.sortedBy { it.key }
         }
     }
 
@@ -206,6 +244,20 @@ fun HistoryScreen(
                     }
                 }
             }
+
+            // Only meaningful once there's more than one group to fold — a long
+            // group list (e.g. Day or Origin over weeks of history) is exactly
+            // where folding one header at a time stops being practical.
+            if (groupBy != HistoryGroupBy.NONE && grouped.size > 1) {
+                val allCollapsed = grouped.isNotEmpty() && grouped.all { it.key in collapsedGroups }
+                TextButton(
+                    onClick = {
+                        collapsedGroups = if (allCollapsed) emptySet() else grouped.map { it.key }.toSet()
+                    },
+                ) {
+                    Text(if (allCollapsed) "Expand all" else "Collapse all", style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
 
         HorizontalDivider(color = AdsbColors.Outline)
@@ -219,72 +271,24 @@ fun HistoryScreen(
                 )
             }
         } else {
-            when (groupBy) {
-                HistoryGroupBy.NONE -> LazyColumn(Modifier.fillMaxSize()) {
+            if (groupBy == HistoryGroupBy.NONE) {
+                LazyColumn(Modifier.fillMaxSize()) {
                     items(sorted, key = { it.icao }) { HistoryRow(it) }
                 }
-                HistoryGroupBy.AIRLINE -> {
-                    val grouped = sorted
-                        .groupBy { it.operator?.takeIf { o -> o.isNotBlank() } ?: "Unknown" }
-                        .entries.sortedBy { it.key }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (airline, group) ->
-                            stickyHeader(key = "hdr_$airline") { GroupHeader(airline) }
-                            items(group, key = { it.icao }) { HistoryRow(it) }
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    grouped.forEach { (label, group) ->
+                        stickyHeader(key = "hdr_$label") {
+                            GroupHeader(
+                                label = label,
+                                count = group.size,
+                                collapsed = label in collapsedGroups,
+                                onClick = {
+                                    collapsedGroups = if (label in collapsedGroups) collapsedGroups - label else collapsedGroups + label
+                                },
+                            )
                         }
-                    }
-                }
-                HistoryGroupBy.WEEKDAY -> {
-                    val weekdayFmt = SimpleDateFormat("EEEE", Locale.getDefault())
-                    val order = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-                    val grouped = sorted
-                        .groupBy { weekdayFmt.format(Date(it.lastSeenMs)) }
-                        .entries.sortedBy { order.indexOf(it.key) }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (weekday, group) ->
-                            stickyHeader(key = "hdr_$weekday") { GroupHeader(weekday) }
-                            items(group, key = { it.icao }) { HistoryRow(it) }
-                        }
-                    }
-                }
-                HistoryGroupBy.DAY -> {
-                    val dayFmt = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
-                    val grouped = sorted
-                        .groupBy { dayFmt.format(Date(it.lastSeenMs)) }
-                        .entries.sortedByDescending { it.key }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (day, group) ->
-                            stickyHeader(key = "hdr_$day") { GroupHeader(day) }
-                            items(group, key = { it.icao }) { HistoryRow(it) }
-                        }
-                    }
-                }
-                HistoryGroupBy.HOUR -> {
-                    val hourFmt = SimpleDateFormat("HH:00", Locale.getDefault())
-                    val grouped = sorted
-                        .groupBy { hourFmt.format(Date(it.lastSeenMs)) }
-                        .entries.sortedByDescending { it.key }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (hour, group) ->
-                            stickyHeader(key = "hdr_$hour") { GroupHeader(hour) }
-                            items(group, key = { it.icao }) { HistoryRow(it) }
-                        }
-                    }
-                }
-                HistoryGroupBy.DESTINATION -> {
-                    val grouped = sorted.groupBy { it.destination() }.entries.sortedBy { it.key }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (dest, group) ->
-                            stickyHeader(key = "hdr_$dest") { GroupHeader(dest) }
-                            items(group, key = { it.icao }) { HistoryRow(it) }
-                        }
-                    }
-                }
-                HistoryGroupBy.ORIGIN -> {
-                    val grouped = sorted.groupBy { it.origin() }.entries.sortedBy { it.key }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        grouped.forEach { (origin, group) ->
-                            stickyHeader(key = "hdr_$origin") { GroupHeader(origin) }
+                        if (label !in collapsedGroups) {
                             items(group, key = { it.icao }) { HistoryRow(it) }
                         }
                     }
@@ -295,19 +299,34 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun GroupHeader(label: String) {
-    Text(
-        label,
-        style = MaterialTheme.typography.labelMedium,
-        color = AdsbColors.Primary,
+private fun GroupHeader(label: String, count: Int, collapsed: Boolean, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
+            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 4.dp),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (collapsed) "▸" else "▾",
+            style = MaterialTheme.typography.labelMedium,
+            color = AdsbColors.Primary,
+            modifier = Modifier.padding(end = 6.dp),
+        )
+        Text(
+            "$label ($count)",
+            style = MaterialTheme.typography.labelMedium,
+            color = AdsbColors.Primary,
+        )
+    }
 }
 
-private val TIME_FORMAT = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+// Date + time, no seconds — matches CsvExporter's own documented convention
+// (timestampFormat()'s comment references this format), which the on-screen
+// row had drifted from (time-only, with seconds). Needed now that grouping
+// can span many days — a bare time-of-day is ambiguous without a date.
+private val TIME_FORMAT = SimpleDateFormat("MM/dd/yyyy HH:mm", Locale.getDefault())
 
 @Composable
 private fun HistoryRow(e: AircraftSeenEntity) {
