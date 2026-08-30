@@ -923,18 +923,7 @@ class PipelineService : Service() {
                     return@launch
                 } catch (e: SdrDriverFailedException) {
                     ErrorLog.error("[USB] driver could not open the device: ${e.message}", e)
-                    // BUSY is not a missing dongle: the driver still holds the device
-                    // from an earlier session. Retrying cannot clear it, and the
-                    // driver app exposes no way to ask it to let go.
-                    val busy = e.message?.contains("BUSY", ignoreCase = true) == true
-                    val timedOut = e.message?.contains(DRIVER_TIMEOUT_MARKER) == true
-                    _sourceState.value = SourceState.Error(
-                        when {
-                            timedOut -> DRIVER_TIMEOUT_MESSAGE
-                            busy -> DRIVER_BUSY_MESSAGE
-                            else -> NO_DONGLE_MESSAGE
-                        }
-                    )
+                    _sourceState.value = SourceState.Error(classifyDriverFailureMessage(e.message))
                 } catch (e: Exception) {
                     ErrorLog.error(describeError(e), e)
                     _sourceState.value = SourceState.Error(NO_DONGLE_MESSAGE)
@@ -1444,6 +1433,24 @@ class PipelineService : Service() {
 
         /** Marker substring `openUsbSource()` puts in a timeout-triggered [SdrDriverFailedException]'s message, so the catch site can tell it apart from a plain driver-returned failure. */
         internal const val DRIVER_TIMEOUT_MARKER = "DRIVER_RESULT_TIMEOUT"
+
+        /**
+         * Maps a driver-open failure message to the right user-facing error string.
+         * Neither BUSY nor "wrong arguments" is a missing dongle: the driver app
+         * still holds the device (or its loopback port) from an earlier session,
+         * so retrying alone cannot clear it, and it exposes no way to ask it to
+         * let go. "Wrong arguments" is the driver's own generic failure string for
+         * this too — confirmed live 2026-08-29: a stale marto.rtl_tcp_andro process
+         * left listening on the loopback port after the dongle was reattached
+         * produced this exact message, not LIBUSB_ERROR_BUSY, and force-stopping
+         * the driver app was what actually cleared it.
+         */
+        internal fun classifyDriverFailureMessage(message: String?): String = when {
+            message?.contains(DRIVER_TIMEOUT_MARKER) == true -> DRIVER_TIMEOUT_MESSAGE
+            message?.contains("BUSY", ignoreCase = true) == true -> DRIVER_BUSY_MESSAGE
+            message?.contains("Wrong arguments", ignoreCase = true) == true -> DRIVER_BUSY_MESSAGE
+            else -> NO_DONGLE_MESSAGE
+        }
     }
 }
 

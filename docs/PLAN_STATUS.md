@@ -3858,3 +3858,64 @@ of `AircraftRow`, not just this one call site.
 + `:app:testDebugUnitTest` pass. Built and installed on the SM_S928B over
 the same wireless ADB connection from §76. Not yet manually confirmed by
 Avi that long-press now opens the map.
+
+## 78. Dongle wouldn't connect — driver's "Wrong arguments" message is the same stuck-session symptom as BUSY, just unrecognized (2026-08-29, v2.3.11)
+
+Avi: "debug the reason that it can't connect to the dongle now and fix
+it." Root-caused with on-device evidence rather than guessed:
+
+- `adb logcat -s AdsbErrorLog:*` showed every reconnect attempt failing
+  identically: `[USB] driver could not open the device: [1] Wrong
+  arguments were supplied! Please, check the sdr_tcp manual!` — the driver
+  app's (`marto.rtl_tcp_andro`) own error string, thrown from
+  `PipelineService.kt:1130` on every retry.
+- Checked whether a dongle was even attached at the USB-host level
+  (`dumpsys usb`'s `host_manager` block) — it was:
+  `vendor_id=3034 product_id=10296 manufacturer_name=RTLSDRBlog product_name=Blog V4`,
+  properly enumerated by Android. So this was never a "no dongle" case,
+  which matters because that's exactly the message the user would have
+  seen (see below).
+- Checked the driver app's own process state (`ps -A`, `cat
+  /proc/net/tcp`): `marto.rtl_tcp_andro` (versionName 3.16, auto-updated
+  2026-08-20) was still running with a `LISTEN` socket on
+  `127.0.0.1:1234` plus a stray `ESTABLISHED`/`CLOSE_WAIT` pair — a
+  session orphaned from an earlier run, still holding the loopback port
+  our fresh `iqsrc://` request needs. A web search on the exact driver
+  string (confirmed via [GitHub issue #24](https://github.com/martinmarinov/rtl_tcp_andro-/issues/24))
+  corroborates that this message is the driver's generic failure string
+  for a session/socket conflict, not literally malformed arguments — our
+  own `iqsrc://` URI (`RtlSdrDefaults.buildIqSrcUri`) matches the
+  driver's documented format exactly and hasn't changed since v1.1.0.
+- Confirmed the diagnosis by fixing it live: `adb shell am force-stop
+  marto.rtl_tcp_andro` to clear the stuck process, then relaunched the
+  app — connected cleanly on the first attempt (`USB tuner: R828D, 29
+  gain steps`, `IQ loop started`).
+
+**The actual code bug**, found while fixing the message rather than just
+the moment: `PipelineService.kt`'s `startPipelineInternal()` retry loop
+already has a `DRIVER_BUSY_MESSAGE` ("the RTL-SDR driver app is still
+holding the dongle from a previous session — force-stop the driver app,
+or unplug and replug the dongle, then reconnect") — the exact right
+guidance for what just happened — but it only fires when the failure
+message contains the literal substring `"BUSY"` (`LIBUSB_ERROR_BUSY`).
+This "wrong arguments" failure is the same underlying condition (driver
+holding a stale session) through a different message, so it fell through
+to the generic `NO_DONGLE_MESSAGE` ("check and reconnect the dongle") —
+actively misleading here, since the dongle was never the problem.
+
+Fixed by widening the busy-check to also match `"Wrong arguments"`, and
+pulled the whole busy/timeout/no-dongle classification (previously three
+inline `val`s in the `catch` block) out into a standalone
+`PipelineService.classifyDriverFailureMessage(message: String?): String`
+— testable without a `Service` or `Robolectric`, unlike the code it
+replaced. New `DriverFailureClassificationTests.kt` (5 cases: null,
+BUSY, wrong-arguments, timeout-marker-wins-over-BUSY-like-text,
+unrecognized-falls-back).
+
+`versionCode` 57→58, `versionName` 2.3.10→2.3.11. `:app:compileDebugKotlin`
++ `:app:testDebugUnitTest` pass. Built, installed, and confirmed connecting
+cleanly on the SM_S928B afterward. The underlying stuck-driver-process
+condition itself isn't something this app can prevent (no cross-app API to
+ask another app's process to release a port/device) — this fix only makes
+the resulting error message tell the user the right remedy instead of the
+wrong one.
