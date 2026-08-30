@@ -1,8 +1,9 @@
 package com.laviavi.adsbandroid.ui.text
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,11 +33,13 @@ import com.laviavi.adsbandroid.ui.model.VsArrow
 import com.laviavi.adsbandroid.ui.theme.AdsbColors
 import com.laviavi.adsbandroid.ui.theme.AdsbDimens
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AircraftRow(
     row: AircraftRowUi,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val rowAlpha = if (row.ageTier == AgeTier.STALE) 0.6f else 1f
     val ageColor = when (row.ageTier) {
@@ -63,7 +66,7 @@ fun AircraftRow(
             .fillMaxWidth()
             .heightIn(min = AdsbDimens.AircraftRowHeight)
             .background(bgColor)
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .drawBehind {
                 if (row.raActive) {
                     drawRect(AdsbColors.Error, Offset.Zero, size.copy(width = 4.dp.toPx()))

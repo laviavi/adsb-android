@@ -3825,7 +3825,36 @@ succeeds. This is also the first commit since v2.2.3 ([e101904]) — §62-§76
 tree; all landed in one commit at Avi's request rather than reconstructed
 into per-version commits after the fact.
 
-Install blocked this session: `adb devices -l` shows nothing, and
-`adb connect` to the phone's mDNS-discovered address
-(`192.168.0.150:38325`) fails outright rather than "actively refused" —
-see the summary for what that likely means and what's needed to unblock it.
+Install blocked initially this session: `adb devices -l` showed nothing,
+and `adb connect` to the phone's mDNS-discovered address failed outright.
+Resolved via a fresh pairing (`adb pair` with a 6-digit code Avi read off
+the phone, then `adb connect` on the separately mDNS-discovered connect
+port) — same stale-pairing pattern as 2026-08-01. Installed successfully
+as v2.3.9.
+
+## 77. Live row long-press to Map didn't fire — two stacked click detectors on one row (2026-08-29, v2.3.10)
+
+Avi, after installing v2.3.9: "the long press on the live traffic
+information for opening the map doesn't work." Root cause, found by
+re-reading §74's own change rather than guessing: `AircraftRowWithMenu`
+(`LiveScreen.kt`) wrapped `AircraftRow` in a `Modifier.combinedClickable(
+onClick, onLongClick)`, but `AircraftRow` (`AircraftRow.kt`) *also* has its
+own `.clickable(onClick = onClick)` baked into its internal `Row` modifier
+chain — two independent gesture detectors stacked on the same node. The
+inner plain `clickable` wins the down event and consumes it before the
+outer `combinedClickable`'s long-press timer ever gets a chance to fire,
+so short-click kept working (both detectors agree on that) while
+long-press silently never did.
+
+Root-cause fix, not a workaround: `AircraftRow` now takes its own
+`onLongClick: (() -> Unit)? = null` and does the gesture detection itself
+via a single `combinedClickable(onClick, onLongClick)` — one detector per
+row, not two. `AircraftRowWithMenu` no longer wraps a second modifier
+around it; it just passes `onLongClick = onShowOnMap` straight through.
+This also removes the double-detector risk for any *other* future caller
+of `AircraftRow`, not just this one call site.
+
+`versionCode` 56→57, `versionName` 2.3.9→2.3.10. `:app:compileDebugKotlin`
++ `:app:testDebugUnitTest` pass. Built and installed on the SM_S928B over
+the same wireless ADB connection from §76. Not yet manually confirmed by
+Avi that long-press now opens the map.
