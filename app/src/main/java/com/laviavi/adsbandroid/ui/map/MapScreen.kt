@@ -83,6 +83,7 @@ fun MapScreen(
     val markers by viewModel.mapMarkers.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val observerPosition by viewModel.observerPosition.collectAsStateWithLifecycle()
+    val focusRequest by viewModel.mapFocusRequest.collectAsStateWithLifecycle()
 
     val configuration = LocalConfiguration.current
     val minDimPx = minOf(configuration.screenWidthDp, configuration.screenHeightDp) * density.toDouble()
@@ -197,17 +198,30 @@ fun MapScreen(
         BasemapLabelStyler.apply(style, labelLayerIds, config.mapLabelSize, config.mapLabelColor?.toHex())
     }
 
-    // One combined camera effect instead of two separately-keyed ones: a past bug had
+    // One combined camera effect instead of separately-keyed ones: a past bug had
     // a recenter effect and a zoom effect both firing on the same rangeStep change,
     // and the map's pan animation and zoom animation running in the same frame
-    // silently swallowed one of them. Merging them here can't reintroduce that.
-    LaunchedEffect(map, followObserver, observer, rangeStep) {
+    // silently swallowed one of them. Merging them here can't reintroduce that —
+    // a pending focus request (Avi: long-press an aircraft on Live, land on the
+    // map with it circled) is one more branch of the same target decision, not a
+    // second competing effect that would race this one's own animateCamera call.
+    LaunchedEffect(map, followObserver, observer, rangeStep, focusRequest, markers) {
         val m = map ?: return@LaunchedEffect
-        val target = if (followObserver) observer else m.cameraPosition.target ?: observer
+        val focusMarker = focusRequest?.let { id -> markers.find { it.icao == id } }
+        val target = when {
+            focusMarker != null -> LatLng(focusMarker.lat, focusMarker.lon)
+            followObserver -> observer
+            else -> m.cameraPosition.target ?: observer
+        }
         m.animateCamera(
             CameraUpdateFactory.newLatLngZoom(target, computeZoom(rangeStep.outerNm, minDimPx, target.latitude)),
             300,
         )
+        if (focusMarker != null) {
+            selectedIcao = focusMarker.icao
+            followObserver = false
+            viewModel.consumeMapFocusRequest()
+        }
     }
 
     // Marker/ring updates are a field-level GeoJSON refresh, not a layer rebuild.

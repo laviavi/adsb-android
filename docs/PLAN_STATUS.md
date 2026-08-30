@@ -3919,3 +3919,40 @@ condition itself isn't something this app can prevent (no cross-app API to
 ask another app's process to release a port/device) — this fix only makes
 the resulting error message tell the user the right remedy instead of the
 wrong one.
+
+## 79. §77's "long-press to map" fix didn't actually circle the aircraft — it reused the wrong selection state (2026-08-29, v2.3.12)
+
+Avi, after trying §77's fix: it navigates to Map, but doesn't circle the
+aircraft, and instead opens the full detail sheet like a short-click would
+— not what was asked for.
+
+Root cause: `onShowOnMap` (`MainActivity.kt`) called
+`viewModel.selectAircraft(icao)` — but that's `MainViewModel.selectedDetail`,
+the *global* state that drives the app-wide `ModalBottomSheet` (the full
+detail sheet, shown regardless of which tab is active). `MapScreen.kt` has
+its own **separate**, screen-local `selectedIcao` (`rememberSaveable`) that
+actually drives the circle highlight (`AircraftMapLayer`'s `selectedIcao`
+param) and the small peek `SelectionSheet` — §77 never touched it, so
+navigating to Map left it at its default `null`: no circle, while the
+unrelated global state opened the full sheet on top.
+
+Fixed with a purpose-built channel instead of reusing either existing one:
+new `MainViewModel.mapFocusRequest: StateFlow<String?>` /
+`focusOnMap(icao)` / `consumeMapFocusRequest()` — a one-shot request,
+distinct from `selectedDetail` specifically so a map focus can never open
+the detail sheet. `MainActivity.kt`'s `onShowOnMap` now calls `focusOnMap`
+instead of `selectAircraft`. `MapScreen.kt` collects it and folds it into
+the existing combined camera `LaunchedEffect` (not a second effect — two
+effects both calling `animateCamera` off the same `followObserver` write
+would race, per that effect's own comment about a past two-effects bug):
+a resolved focus marker now takes priority in the target decision, pans/
+zooms to it, sets the local `selectedIcao` (the actual circle trigger),
+turns off `followObserver`, and consumes the request. If the aircraft
+isn't in `markers` yet (screen still loading) the request stays pending
+and resolves on the next `markers` update; if it never resolves (aircraft
+departed before the screen switch), nothing happens — no crash, request
+just stays queued.
+
+`versionCode` 58→59, `versionName` 2.3.11→2.3.12. `:app:compileDebugKotlin`
++ `:app:testDebugUnitTest` pass. Built and installed on the SM_S928B — not
+yet manually confirmed by Avi.

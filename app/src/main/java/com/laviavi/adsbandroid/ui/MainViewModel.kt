@@ -157,6 +157,18 @@ class MainViewModel @Inject constructor() : ViewModel() {
         icao?.let { id -> list.find { it.icao == id } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /**
+     * One-shot "select this aircraft on the map" request, distinct from
+     * [selectAircraft]/[selectedDetail] — that drives the global detail bottom
+     * sheet, which a map focus should NOT open (Avi: long-press on Live should
+     * just circle the aircraft on the map, not act like it was tapped for
+     * details). [MapScreen] consumes this once via [consumeMapFocusRequest].
+     */
+    private val _mapFocusRequest = MutableStateFlow<String?>(null)
+    val mapFocusRequest: StateFlow<String?> = _mapFocusRequest.asStateFlow()
+    fun focusOnMap(icao: String) { _mapFocusRequest.value = icao }
+    fun consumeMapFocusRequest() { _mapFocusRequest.value = null }
+
     // --- Service callbacks ---
 
     fun onHistoryUpdate(list: List<AircraftSeenEntity>) { _history.value = list }

@@ -299,7 +299,7 @@ private fun AdsbScaffold(
                             }
                         },
                         onShowOnMap = { icao ->
-                            viewModel.selectAircraft(icao)
+                            viewModel.focusOnMap(icao)
                             navController.navigate(AdsbDestination.MAP.route) {
                                 popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
